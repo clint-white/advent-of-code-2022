@@ -26,7 +26,7 @@ pub enum Shape {
 impl Shape {
     /// Returns the outcome obtained by `self` when played against `other`.
     #[must_use]
-    pub fn outcome(&self, other: &Self) -> Outcome {
+    pub const fn outcome(&self, other: &Self) -> Outcome {
         use Shape::{Paper, Rock, Scissors};
 
         match (self, other) {
@@ -37,7 +37,7 @@ impl Shape {
     }
 
     #[must_use]
-    pub fn score(&self) -> i32 {
+    pub const fn score(&self) -> i32 {
         *self as i32
     }
 }
@@ -52,13 +52,13 @@ pub enum Outcome {
 
 impl Outcome {
     #[must_use]
-    pub fn score(&self) -> i32 {
+    pub const fn score(&self) -> i32 {
         *self as i32
     }
 
     /// Returns the shape that will obtain outcome `self` when played against shape `other`.
     #[must_use]
-    pub fn shape(&self, other: &Shape) -> Shape {
+    pub const fn shape(&self, other: &Shape) -> Shape {
         use Outcome::{Draw, Loss, Win};
         use Shape::{Paper, Rock, Scissors};
 
@@ -113,7 +113,7 @@ pub fn parse_input(s: &str) -> Result<Vec<(char, char)>> {
 /// # Errors
 ///
 /// Returns [`Error::Invalid`] if the `char` is not one of `'A'`, `'B'`, `'C'`.
-pub fn parse_shape(c: char) -> Result<Shape> {
+pub const fn parse_shape(c: char) -> Result<Shape> {
     match c {
         'A' => Ok(Shape::Rock),
         'B' => Ok(Shape::Paper),
@@ -127,7 +127,7 @@ pub fn parse_shape(c: char) -> Result<Shape> {
 /// # Errors
 ///
 /// Returns [`Error::Invalid`] if the `char` is not one of `'X'`, `'Y'`, `'Z'`.
-pub fn decode_as_shape(c: char) -> Result<Shape> {
+pub const fn decode_as_shape(c: char) -> Result<Shape> {
     match c {
         'X' => Ok(Shape::Rock),
         'Y' => Ok(Shape::Paper),
@@ -141,7 +141,7 @@ pub fn decode_as_shape(c: char) -> Result<Shape> {
 /// # Errors
 ///
 /// Returns [`Error::Invalid`] if the `char` is not one of `'X'`, `'Y'`, `'Z'`.
-pub fn decode_as_outcome(c: char) -> Result<Outcome> {
+pub const fn decode_as_outcome(c: char) -> Result<Outcome> {
     match c {
         'X' => Ok(Outcome::Loss),
         'Y' => Ok(Outcome::Draw),
