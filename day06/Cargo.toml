@@ -1,0 +1,8 @@
+[package]
+name = "day06"
+version = "0.1.0"
+edition = "2021"
+description = "Advent of Code 2022 Day 6"
+
+[dependencies]
+hashbag = "0.1.9"
