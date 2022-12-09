@@ -147,34 +147,58 @@ impl From<Direction> for Position<i32> {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Rope {
-    head: Position<i32>,
-    tail: Position<i32>,
+#[derive(Debug, Copy, Clone)]
+pub struct Rope<const N: usize> {
+    knots: [Position<i32>; N],
 }
 
-impl Rope {
+impl<const N: usize> Default for Rope<N> {
+    fn default() -> Self {
+        Self {
+            knots: [Position::default(); N],
+        }
+    }
+}
+
+impl<const N: usize> Rope<N> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn head(&self) -> Position<i32> {
-        self.head
+    /// Returns the position of knot `i`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= N`.
+    #[must_use]
+    #[inline]
+    pub fn knot(&self, i: usize) -> Position<i32> {
+        self.knots[i]
     }
 
+    /// Returns the position of the tail knot.
+    #[must_use]
+    #[inline]
     pub fn tail(&self) -> Position<i32> {
-        self.tail
+        self.knot(N - 1)
     }
 
     /// Move the rope by moving the head in the given direction.
     pub fn move_head(&mut self, direction: Direction) {
         let delta: Position<i32> = direction.into();
-        self.head += delta;
-        self.adjust_tail();
+        self.knots[0] += delta;
+        for i in 0..N - 1 {
+            self.adjust_next_knot(i);
+        }
     }
 
-    fn adjust_tail(&mut self) {
-        let delta = self.head - self.tail;
+    /// Adjust the position of knot `i + 1` to follow knot `i`.
+    fn adjust_next_knot(&mut self, i: usize) {
+        let delta = self.knots[i] - self.knots[i + 1];
+        if N == 2 {
+            assert!(delta.x.abs() < 2 || delta.y.abs() < 2);
+        }
         let (dx, dy) = match (delta.x, delta.y) {
             (0, 2) => (0, 1),
             (0, -2) => (0, -1),
@@ -193,15 +217,21 @@ impl Rope {
             (1, -2) | (2, -1) => (1, -1),
             (-1, 2) | (-2, 1) => (-1, 1),
             (-1, -2) | (-2, -1) => (-1, -1),
+            // the following cases are unreachable for `N == 2`
+            (2, 2) => (1, 1),
+            (2, -2) => (1, -1),
+            (-2, 2) => (-1, 1),
+            (-2, -2) => (-1, -1),
             _ => unreachable!(),
         };
-        self.tail += Position::new(dx, dy);
+        self.knots[i + 1] += Position::new(dx, dy);
     }
 }
 
-pub fn solve_part1(motions: &[Motion]) -> usize {
+#[must_use]
+pub fn count_unique_tail_positions<const N: usize>(motions: &[Motion]) -> usize {
     let mut tail_positions = HashMap::new();
-    let mut rope = Rope::new();
+    let mut rope = Rope::<N>::new();
     *tail_positions.entry(rope.tail()).or_insert(0) += 1;
     for motion in motions {
         for _ in 0..motion.distance {
@@ -212,13 +242,23 @@ pub fn solve_part1(motions: &[Motion]) -> usize {
     tail_positions.len()
 }
 
+#[must_use]
+pub fn solve_part1(motions: &[Motion]) -> usize {
+    count_unique_tail_positions::<2>(motions)
+}
+
+#[must_use]
+pub fn solve_part2(motions: &[Motion]) -> usize {
+    count_unique_tail_positions::<10>(motions)
+}
+
 /// Parses an input `str` into a vector of [`Motion`] commands.
 ///
 /// # Errors
 ///
 /// This function returns an error if it cannot parse the input.
 pub fn parse_input(s: &str) -> Result<Vec<Motion>> {
-    s.lines().map(|line| line.parse()).collect()
+    s.lines().map(str::parse).collect()
 }
 
 #[cfg(test)]
@@ -247,11 +287,28 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let motions = parse_input(&input)?;
+        let num_positions = solve_part2(&motions);
+        assert_eq!(num_positions, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_part2_example2() -> Result<()> {
+        let input = fs::read_to_string("data/example2")?;
+        let motions = parse_input(&input)?;
+        let num_positions = solve_part2(&motions);
+        assert_eq!(num_positions, 36);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let motions = parse_input(&input)?;
+        let num_positions = solve_part2(&motions);
+        assert_eq!(num_positions, 2478);
+        Ok(())
     }
 }
