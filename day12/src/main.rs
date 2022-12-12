@@ -13,6 +13,12 @@ fn main() -> Result<()> {
     } else {
         println!("[Part 1] Source and sink are not in the same component");
     }
+    let shortest_path = solve_part2(&height_map);
+    if let Some(n) = shortest_path {
+        println!("[Part 2] Shortest path from sink to some point of 0 elevation: {n}");
+    } else {
+        println!("[Part 2] Sink is not in the same component as any point of zero elevation");
+    }
 
     Ok(())
 }

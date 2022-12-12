@@ -3,7 +3,7 @@
 use std::io;
 
 pub use ndarray::Array2;
-use ndarray::ShapeError;
+use ndarray::{ShapeError, Zip};
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -86,7 +86,14 @@ impl HeightMap {
     /// # Panics
     ///
     /// Panics if the node is out of bounds for the grid.
-    pub fn neighbors(&self, node: [usize; 2]) -> impl Iterator<Item = [usize; 2]> + '_ {
+    pub fn neighbors<'a, F>(
+        &'a self,
+        node: [usize; 2],
+        allowed: F,
+    ) -> impl Iterator<Item = [usize; 2]> + '_
+    where
+        F: Fn([usize; 2], [usize; 2]) -> bool + 'a,
+    {
         let i = node[0];
         let j = node[1];
         let (nrows, ncols) = self.dimensions();
@@ -97,28 +104,29 @@ impl HeightMap {
             (Some(i), if j + 1 < ncols { Some(j + 1) } else { None }),
         ];
         adjacent.into_iter().filter_map(move |(a, b)| match (a, b) {
-            (Some(k), Some(l)) => {
-                if self.array[[k, l]] <= self.array[[i, j]] + 1 {
-                    Some([k, l])
-                } else {
-                    None
-                }
-            }
+            (Some(k), Some(l)) if allowed([i, j], [k, l]) => Some([k, l]),
             _ => None,
         })
     }
 }
 
 /// Finds the shortest paths from the source node to every other node.
-pub fn find_shortest_paths(graph: &HeightMap) -> Array2<Option<usize>> {
+pub fn find_shortest_paths<'a, F>(
+    graph: &'a HeightMap,
+    source: [usize; 2],
+    allowed: F,
+) -> Array2<Option<usize>>
+where
+    F: Fn([usize; 2], [usize; 2]) -> bool + 'a,
+{
     let mut visited: Array2<Option<usize>> = Array2::default(graph.array.raw_dim());
-    let mut current_nodes = vec![graph.source];
-    visited[graph.source] = Some(0);
+    let mut current_nodes = vec![source];
+    visited[source] = Some(0);
     while !current_nodes.is_empty() {
         let mut next_nodes = Vec::new();
         for node in current_nodes {
             let d = visited[node].expect("node has been visited");
-            for child in graph.neighbors(node) {
+            for child in graph.neighbors(node, &allowed) {
                 if visited[child].is_none() {
                     visited[child] = Some(d + 1);
                     next_nodes.push(child);
@@ -131,7 +139,25 @@ pub fn find_shortest_paths(graph: &HeightMap) -> Array2<Option<usize>> {
 }
 
 pub fn solve_part1(graph: &HeightMap) -> Option<usize> {
-    find_shortest_paths(graph)[graph.sink]
+    find_shortest_paths(graph, graph.source, |from, to| {
+        graph.array[to] <= graph.array[from] + 1
+    })[graph.sink]
+}
+
+pub fn solve_part2(graph: &HeightMap) -> Option<usize> {
+    let distances = find_shortest_paths(graph, graph.sink, |from, to| {
+        graph.array[from] <= graph.array[to] + 1
+    });
+    Zip::from(&graph.array)
+        .and(distances.view())
+        .fold(None, |min, &height, &distance| {
+            match (min, height, distance) {
+                (None, 0, Some(d)) => Some(d),
+                (None, _, _) => None,
+                (Some(m), 0, Some(d)) => Some(m.min(d)),
+                (Some(m), _, _) => Some(m),
+            }
+        })
 }
 
 pub fn parse_input(s: &str) -> Result<HeightMap> {
@@ -230,11 +256,19 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let graph = parse_input(&input)?;
+        let shortest_path = solve_part2(&graph);
+        assert_eq!(shortest_path, Some(29));
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let graph = parse_input(&input)?;
+        let shortest_path = solve_part2(&graph);
+        assert_eq!(shortest_path, Some(363));
+        Ok(())
     }
 }
