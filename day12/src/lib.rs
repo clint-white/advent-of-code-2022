@@ -49,34 +49,39 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub struct HeightMap {
-    array: Array2<i8>,
+    array: Array2<u8>,
     source: [usize; 2],
     sink: [usize; 2],
 }
 
 impl HeightMap {
     #[inline]
+    #[must_use]
     pub fn num_rows(&self) -> usize {
         self.array.shape()[0]
     }
 
     #[inline]
+    #[must_use]
     pub fn num_cols(&self) -> usize {
         self.array.shape()[1]
     }
 
     #[inline]
+    #[must_use]
     pub fn dimensions(&self) -> (usize, usize) {
         let shape = self.array.shape();
         (shape[0], shape[1])
     }
 
     #[inline]
+    #[must_use]
     pub fn source(&self) -> [usize; 2] {
         self.source
     }
 
     #[inline]
+    #[must_use]
     pub fn sink(&self) -> [usize; 2] {
         self.sink
     }
@@ -138,12 +143,14 @@ where
     visited
 }
 
+#[must_use]
 pub fn solve_part1(graph: &HeightMap) -> Option<usize> {
     find_shortest_paths(graph, graph.source, |from, to| {
         graph.array[to] <= graph.array[from] + 1
     })[graph.sink]
 }
 
+#[must_use]
 pub fn solve_part2(graph: &HeightMap) -> Option<usize> {
     let distances = find_shortest_paths(graph, graph.sink, |from, to| {
         graph.array[from] <= graph.array[to] + 1
@@ -160,6 +167,16 @@ pub fn solve_part2(graph: &HeightMap) -> Option<usize> {
         })
 }
 
+/// Parses the problem input into a [`HeightMap`].
+///
+/// # Errors
+///
+/// This function returns an error in the following situations:
+///
+/// 1. If the input map does not form a rectangular grid.
+/// 2. If the inputs contains characters other than ascii lowercase or 'S' or 'E'.
+/// 3. If there is not exactly one cell containing an 'S'.
+/// 4. If there is not exactly one cell containing an 'E'.
 pub fn parse_input(s: &str) -> Result<HeightMap> {
     let mut data = Vec::new();
     let mut nrows = 0;
@@ -183,8 +200,8 @@ pub fn parse_input(s: &str) -> Result<HeightMap> {
             .iter()
             .map(|byte| match byte {
                 b'S' => Ok(0),
-                b'E' => Ok((b'z' - b'a') as i8),
-                c if c.is_ascii_lowercase() => Ok((c - b'a') as i8),
+                b'E' => Ok(b'z' - b'a'),
+                c if c.is_ascii_lowercase() => Ok(c - b'a'),
                 c => Err(Error::Parse(*c)),
             })
             .collect();
@@ -210,8 +227,8 @@ pub fn parse_input(s: &str) -> Result<HeightMap> {
         nrows += 1;
     }
     let array = Array2::from_shape_vec((nrows, ncols.unwrap_or(0)), data)?;
-    let source = source.ok_or_else(|| Error::MissingSource)?;
-    let sink = sink.ok_or_else(|| Error::MissingSink)?;
+    let source = source.ok_or(Error::MissingSource)?;
+    let sink = sink.ok_or(Error::MissingSink)?;
     let height_map = HeightMap {
         array,
         source,
