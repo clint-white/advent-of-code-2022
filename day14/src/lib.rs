@@ -45,14 +45,12 @@ pub mod part1 {
     fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
         let maxx = paths
             .iter()
-            .map(|line| line.iter().map(|&(x, _)| x))
-            .flatten()
+            .flat_map(|line| line.iter().map(|&(x, _)| x))
             .max()
             .unwrap_or(0);
         let maxy = paths
             .iter()
-            .map(|line| line.iter().map(|&(_, y)| y))
-            .flatten()
+            .flat_map(|line| line.iter().map(|&(_, y)| y))
             .max()
             .unwrap_or(0);
         let mut occupied: Array2<bool> = Array2::default((maxx + 2, maxy + 1));
@@ -76,7 +74,7 @@ pub mod part1 {
     fn drop_sand(occupied: &mut Array2<bool>, point: Point<usize>) -> bool {
         let ncols = occupied.shape()[1];
         let (x0, y0) = point;
-        if let Some(y) = (y0..ncols).filter(|&y| occupied[[x0, y]]).next() {
+        if let Some(y) = (y0..ncols).find(|&y| occupied[[x0, y]]) {
             if !occupied[[x0 - 1, y]] {
                 drop_sand(occupied, (x0 - 1, y))
             } else if !occupied[[x0 + 1, y]] {
@@ -112,14 +110,12 @@ pub mod part2 {
     fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
         let maxx = paths
             .iter()
-            .map(|line| line.iter().map(|&(x, _)| x))
-            .flatten()
+            .flat_map(|line| line.iter().map(|&(x, _)| x))
             .max()
             .unwrap_or(0);
         let maxy = paths
             .iter()
-            .map(|line| line.iter().map(|&(_, y)| y))
-            .flatten()
+            .flat_map(|line| line.iter().map(|&(_, y)| y))
             .max()
             .unwrap_or(0);
         let mut occupied: Array2<bool> = Array2::default((maxx + maxy + 1, maxy + 3));
@@ -145,8 +141,7 @@ pub mod part2 {
         let ncols = occupied.shape()[1];
         let (x0, y0) = point;
         let y = (y0..ncols)
-            .filter(|&y| occupied[[x0, y]])
-            .next()
+            .find(|&y| occupied[[x0, y]])
             .expect("there is a solid floor");
         if y == 0 {
             false
