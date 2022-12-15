@@ -1,0 +1,10 @@
+[package]
+name = "day14"
+version = "0.1.0"
+edition = "2021"
+description = "Advent of Code 2022 Day 14"
+
+[dependencies]
+ndarray = "0.15.6"
+nom = "7.1.1"
+thiserror = "1.0"
