@@ -10,5 +10,8 @@ fn main() -> Result<()> {
     let count = solve_part1(&paths)?;
     println!("[Part 1] Number of grands of sand that come to rest: {count}");
 
+    let count = solve_part2(&paths)?;
+    println!("[Part 2] Number of grands of sand that come to rest: {count}");
+
     Ok(())
 }

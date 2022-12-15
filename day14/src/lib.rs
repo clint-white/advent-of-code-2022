@@ -1,6 +1,5 @@
 //! Solutions to [Advent of Code 2022 Day 14](https://adventofcode.com/2022/day/14).
 
-use std::cmp::{max, min};
 use std::io;
 
 pub use ndarray::Array2;
@@ -34,42 +33,124 @@ pub fn parse_input(s: &str) -> Result<Vec<Vec<Point<usize>>>> {
     Ok(paths)
 }
 
-fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
-    let maxx = paths
-        .iter()
-        .map(|line| line.iter().map(|&(x, _)| x))
-        .flatten()
-        .max()
-        .unwrap_or(0);
-    let maxy = paths
-        .iter()
-        .map(|line| line.iter().map(|&(_, y)| y))
-        .flatten()
-        .max()
-        .unwrap_or(0);
-    let mut occupied: Array2<bool> = Array2::default((maxx + 2, maxy + 1));
-    for path in paths {
-        for coordinates in path.windows(2) {
-            let (x0, y0) = coordinates[0];
-            let (x1, y1) = coordinates[1];
-            if x0 == x1 {
-                (min(y0, y1)..=max(y0, y1)).for_each(|y| occupied[[x0, y]] = true);
-            } else if y0 == y1 {
-                (min(x0, x1)..=max(x0, x1)).for_each(|x| occupied[[x, y0]] = true);
-            } else {
-                return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
+pub use part1::solve_part1;
+
+pub mod part1 {
+    use std::cmp::{max, min};
+
+    use ndarray::Array2;
+
+    use crate::{Error, Point, Result};
+
+    fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
+        let maxx = paths
+            .iter()
+            .map(|line| line.iter().map(|&(x, _)| x))
+            .flatten()
+            .max()
+            .unwrap_or(0);
+        let maxy = paths
+            .iter()
+            .map(|line| line.iter().map(|&(_, y)| y))
+            .flatten()
+            .max()
+            .unwrap_or(0);
+        let mut occupied: Array2<bool> = Array2::default((maxx + 2, maxy + 1));
+        for path in paths {
+            for coordinates in path.windows(2) {
+                let (x0, y0) = coordinates[0];
+                let (x1, y1) = coordinates[1];
+                if x0 == x1 {
+                    (min(y0, y1)..=max(y0, y1)).for_each(|y| occupied[[x0, y]] = true);
+                } else if y0 == y1 {
+                    (min(x0, x1)..=max(x0, x1)).for_each(|x| occupied[[x, y0]] = true);
+                } else {
+                    return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
+                }
             }
         }
+        Ok(occupied)
     }
-    Ok(occupied)
+
+    /// Adds a grain of sand to the grid and returns `true` if it comes to rest and `false` otherwise.
+    fn drop_sand(occupied: &mut Array2<bool>, point: Point<usize>) -> bool {
+        let ncols = occupied.shape()[1];
+        let (x0, y0) = point;
+        if let Some(y) = (y0..ncols).filter(|&y| occupied[[x0, y]]).next() {
+            if !occupied[[x0 - 1, y]] {
+                drop_sand(occupied, (x0 - 1, y))
+            } else if !occupied[[x0 + 1, y]] {
+                drop_sand(occupied, (x0 + 1, y))
+            } else {
+                occupied[[x0, y - 1]] = true;
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn solve_part1(paths: &[Vec<Point<usize>>]) -> Result<usize> {
+        let mut occupied = build_array(paths)?;
+        let mut count = 0;
+        while drop_sand(&mut occupied, (500, 0)) {
+            count += 1;
+        }
+        Ok(count)
+    }
 }
 
-/// Adds a grain of sand to the grid and returns `true` if it comes to rest and `false` otherwise.
-fn drop_sand(occupied: &mut Array2<bool>, point: Point<usize>) -> bool {
-    let ncols = occupied.shape()[1];
-    let (x0, y0) = point;
-    if let Some(y) = (y0..ncols).filter(|&y| occupied[[x0, y]]).next() {
-        if !occupied[[x0 - 1, y]] {
+pub use part2::solve_part2;
+
+pub mod part2 {
+    use std::cmp::{max, min};
+
+    use ndarray::Array2;
+
+    use crate::{Error, Point, Result};
+
+    fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
+        let maxx = paths
+            .iter()
+            .map(|line| line.iter().map(|&(x, _)| x))
+            .flatten()
+            .max()
+            .unwrap_or(0);
+        let maxy = paths
+            .iter()
+            .map(|line| line.iter().map(|&(_, y)| y))
+            .flatten()
+            .max()
+            .unwrap_or(0);
+        let mut occupied: Array2<bool> = Array2::default((maxx + maxy + 1, maxy + 3));
+        for path in paths {
+            for coordinates in path.windows(2) {
+                let (x0, y0) = coordinates[0];
+                let (x1, y1) = coordinates[1];
+                if x0 == x1 {
+                    (min(y0, y1)..=max(y0, y1)).for_each(|y| occupied[[x0, y]] = true);
+                } else if y0 == y1 {
+                    (min(x0, x1)..=max(x0, x1)).for_each(|x| occupied[[x, y0]] = true);
+                } else {
+                    return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
+                }
+            }
+        }
+        (0..maxx + maxy + 1).for_each(|x| occupied[[x, maxy + 2]] = true);
+        Ok(occupied)
+    }
+
+    /// Attempts to add a grain of sand and returns `true` if this is possible.
+    fn drop_sand(occupied: &mut Array2<bool>, point: Point<usize>) -> bool {
+        let ncols = occupied.shape()[1];
+        let (x0, y0) = point;
+        let y = (y0..ncols)
+            .filter(|&y| occupied[[x0, y]])
+            .next()
+            .expect("there is a solid floor");
+        if y == 0 {
+            false
+        } else if !occupied[[x0 - 1, y]] {
             drop_sand(occupied, (x0 - 1, y))
         } else if !occupied[[x0 + 1, y]] {
             drop_sand(occupied, (x0 + 1, y))
@@ -77,20 +158,17 @@ fn drop_sand(occupied: &mut Array2<bool>, point: Point<usize>) -> bool {
             occupied[[x0, y - 1]] = true;
             true
         }
-    } else {
-        false
+    }
+
+    pub fn solve_part2(paths: &[Vec<Point<usize>>]) -> Result<usize> {
+        let mut occupied = build_array(paths)?;
+        let mut count = 0;
+        while drop_sand(&mut occupied, (500, 0)) {
+            count += 1;
+        }
+        Ok(count)
     }
 }
-
-pub fn solve_part1(paths: &[Vec<Point<usize>>]) -> Result<usize> {
-    let mut occupied = build_array(paths)?;
-    let mut count = 0;
-    while drop_sand(&mut occupied, (500, 0)) {
-        count += 1;
-    }
-    Ok(count)
-}
-
 mod parser {
     use nom::{
         bytes::complete::tag,
@@ -150,11 +228,19 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let paths = parse_input(&input)?;
+        let count = solve_part2(&paths)?;
+        assert_eq!(count, 93);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let paths = parse_input(&input)?;
+        let count = solve_part2(&paths)?;
+        assert_eq!(count, 29044);
+        Ok(())
     }
 }
