@@ -1,8 +1,11 @@
 //! Solutions to [Advent of Code 2022 Day 17](https://adventofcode.com/2022/day/17).
 
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 use std::iter::Cycle;
+use std::vec;
 
 use thiserror::Error;
 
@@ -144,13 +147,17 @@ pub const ROCK_SHAPES: [Rock; 5] = [
 
 /// A game board with floor as row `0` and walls in columns `0` and `N - 4`.
 #[derive(Debug, Clone)]
-pub struct Board<const N: usize, I, R> {
+pub struct Board<const N: usize> {
     rows: Vec<[bool; N]>,
-    jets: Cycle<I>,
-    rocks: Cycle<R>,
+    jets: Cycle<vec::IntoIter<Shift>>,
+    rocks: Cycle<vec::IntoIter<Rock>>,
+    jet_period: usize,
+    rock_period: usize,
+    jet_count: usize,
+    rock_count: usize,
 }
 
-impl<const N: usize, I, R> fmt::Display for Board<N, I, R> {
+impl<const N: usize> fmt::Display for Board<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for row in self.rows.iter().rev() {
             write_bool_slice(f, &row[..N - 3])?;
@@ -159,22 +166,25 @@ impl<const N: usize, I, R> fmt::Display for Board<N, I, R> {
     }
 }
 
-impl<const N: usize, I, R> Board<N, I, R>
-where
-    I: Iterator<Item = Shift> + Clone,
-    R: Iterator<Item = Rock> + Clone,
-{
+impl<const N: usize> Board<N> {
     /// Returns a new board with only a rocky floor.
-    pub fn new<J, S>(jets: J, rocks: S) -> Self
-    where
-        J: IntoIterator<IntoIter = I>,
-        S: IntoIterator<IntoIter = R>,
-    {
+    #[must_use]
+    pub fn new(jets: Vec<Shift>, rocks: Vec<Rock>) -> Self {
         let floor = [true; N];
         let rows = vec![floor];
+        let jet_period = jets.len();
+        let rock_period = rocks.len();
         let jets = jets.into_iter().cycle();
         let rocks = rocks.into_iter().cycle();
-        Self { rows, jets, rocks }
+        Self {
+            rows,
+            jets,
+            rocks,
+            jet_period,
+            rock_period,
+            jet_count: 0,
+            rock_count: 0,
+        }
     }
 
     /// Adds a new row with no rocks except walls in columns `0` and `N-4`.
@@ -187,6 +197,7 @@ where
     }
 
     /// Returns the highest row with a filled cell in columns 1 through `N - 5` inclusive.
+    #[must_use]
     pub fn find_peak(&self) -> usize {
         self.rows
             .iter()
@@ -206,6 +217,7 @@ where
     ///
     /// This adds enough empty rows to start dropping the next rock and it returns the row index of
     /// the bottom row of the rock cursor.
+    #[must_use]
     pub fn pad(&mut self) -> usize {
         let k = self.find_peak();
         let l = self.rows.len();
@@ -216,6 +228,7 @@ where
     /// Returns `true` iff the given rock fits with its cursor in the given `row` and `column`.
     ///
     /// The rock fits if none of its filled cells overlap a filled cell of the board.
+    #[must_use]
     pub fn fits(&self, rock: Rock, row: usize, column: usize) -> bool {
         // Iterate over the rows of the rock cursor zipped with the rows of the board starting at
         // row index `row`.  For each pair of row, iterate over the columns of that row of the rock
@@ -254,6 +267,7 @@ where
         loop {
             // The jets of air blow the rock.
             let shift = self.jets.next().expect("the jets cycle endlessly");
+            self.jet_count += 1;
             let (r, c) = match shift {
                 Shift::Left => (cursor_row, cursor_col - 1),
                 Shift::Right => (cursor_row, cursor_col + 1),
@@ -277,21 +291,90 @@ where
 
     pub fn do_round(&mut self) {
         let rock = self.rocks.next().expect("the rocks cycle endlessly");
+        self.rock_count += 1;
         self.drop_rock(rock);
+        /*
+        dbg!(
+            self.jet_count,
+            self.jet_count % 10091,
+            self.rock_count,
+            self.rock_count % 5
+        );
+        */
     }
 
     pub fn do_rounds(&mut self, num_rounds: usize) {
-        (0..num_rounds).for_each(|_| self.do_round());
+        (0..num_rounds).for_each(|_| {
+            self.do_round();
+        });
+    }
+
+    #[must_use]
+    pub fn state(&self) -> State<N> {
+        let top_floor = self.find_floor();
+        let rows = self.rows[top_floor..].to_vec();
+        State {
+            rows,
+            jet_count: self.jet_count % self.jet_period,
+            rock_count: self.rock_count % self.rock_period,
+        }
+    }
+
+    /// Finds the highest row of all rocks.
+    #[must_use]
+    pub fn find_floor(&self) -> usize {
+        self.rows
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(k, row)| {
+                if row[1..N - 4].iter().all(|&t| t) {
+                    Some(k)
+                } else {
+                    None
+                }
+            })
+            .expect("The board has a rocky floor")
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct State<const N: usize> {
+    rows: Vec<[bool; N]>,
+    jet_count: usize,
+    rock_count: usize,
+}
+
 #[must_use]
-pub fn solve_part1(shifts: &[Shift]) -> usize {
-    let shifts = shifts.iter().copied();
-    let rocks = ROCK_SHAPES.iter().copied();
-    let mut board = Board::<12, _, _>::new(shifts, rocks);
+pub fn solve_part1(shifts: Vec<Shift>) -> usize {
+    let rocks = ROCK_SHAPES.to_vec();
+    let mut board = Board::<12>::new(shifts, rocks);
     board.do_rounds(2022);
     board.find_peak()
+}
+
+#[must_use]
+pub fn solve_part2(shifts: Vec<Shift>, num_rounds: usize) -> Option<usize> {
+    let rocks = ROCK_SHAPES.to_vec();
+    let mut board = Board::<12>::new(shifts, rocks);
+    let mut states = HashMap::new();
+    for round in 1.. {
+        board.do_round();
+        let state = board.state();
+        let height = board.find_peak();
+        let (last_round, last_height) = states.entry(state).or_insert((round, height));
+        if *last_round < round {
+            let period = round - *last_round;
+            let periods = (num_rounds - round) / period;
+            let remainder = (num_rounds - round) % period;
+            if remainder == 0 {
+                return Some(height + periods * (height - *last_height));
+            }
+            *last_round = round;
+            *last_height = height;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -304,7 +387,7 @@ mod tests {
     fn test_part1_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let shifts = parse_input(&input)?;
-        let height = solve_part1(&shifts);
+        let height = solve_part1(shifts);
         assert_eq!(height, 3068);
         Ok(())
     }
@@ -313,18 +396,24 @@ mod tests {
     fn test_part1_input() -> Result<()> {
         let input = fs::read_to_string("data/input")?;
         let shifts = parse_input(&input)?;
-        let height = solve_part1(&shifts);
+        let height = solve_part1(shifts);
         assert_eq!(height, 3071);
         Ok(())
     }
 
+    /*
     #[test]
     fn test_part2_example() -> Result<()> {
         todo!();
     }
+    */
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let shifts = parse_input(&input)?;
+        let height = solve_part2(shifts, 1_000_000_000_000);
+        assert_eq!(height, Some(1523615160362));
+        Ok(())
     }
 }
