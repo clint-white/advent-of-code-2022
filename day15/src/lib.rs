@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::io;
 use std::num::ParseIntError;
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use num_traits::Signed;
@@ -31,6 +32,14 @@ pub enum Error {
     /// An error parsing an integer.
     #[error("Error parsing an integer")]
     ParseInt(#[from] ParseIntError),
+
+    /// No location possible for beacon.
+    #[error("No location possible for beacon")]
+    NoLocation,
+
+    /// Multiple locations possible for beacon.
+    #[error("Multiple locations possible for beacon")]
+    MultipleLocations,
 }
 
 /// A specialized [`Result`] type for operations in this crate.
@@ -161,11 +170,35 @@ where
 }
 
 impl ClosedInterval<i64> {
+    #[must_use]
     pub fn len(&self) -> usize {
         0.max(self.end - self.start + 1) as usize
     }
+
+    /// Returns the union of `self` and `other` if it forms a single closed interval.
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Option<Self> {
+        if self.end.min(other.end) + 1 >= self.start.max(other.start) {
+            Some(Self::new(
+                self.start.min(other.start),
+                self.end.max(other.end),
+            ))
+        } else {
+            None
+        }
+    }
 }
 
+impl IntoIterator for ClosedInterval<i64> {
+    type Item = i64;
+    type IntoIter = RangeInclusive<i64>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.start..=self.end
+    }
+}
+
+#[must_use]
 pub fn build_intervals(reports: &[SensorReport<i64>], y: i64) -> Vec<ClosedInterval<i64>> {
     reports
         .iter()
@@ -185,6 +218,25 @@ pub fn build_intervals(reports: &[SensorReport<i64>], y: i64) -> Vec<ClosedInter
         .collect()
 }
 
+#[must_use]
+pub fn merge_intervals(mut intervals: Vec<ClosedInterval<i64>>) -> Vec<ClosedInterval<i64>> {
+    intervals.sort_unstable();
+    let mut merged = Vec::new();
+    let mut intervals = intervals.into_iter();
+    if let Some(mut i) = intervals.next() {
+        for j in intervals {
+            if let Some(union) = i.union(&j) {
+                i = union;
+            } else {
+                merged.push(i);
+                i = j;
+            }
+        }
+        merged.push(i);
+    }
+    merged
+}
+
 pub fn solve_part1(reports: &[SensorReport<i64>], y: i64) -> usize {
     // Find the beacon positions.
     let beacon_xs: HashSet<_> = reports
@@ -197,24 +249,48 @@ pub fn solve_part1(reports: &[SensorReport<i64>], y: i64) -> usize {
             }
         })
         .collect();
-    let mut intervals = build_intervals(reports, y);
-    intervals.sort_unstable();
-    let mut non_beacons = 0;
-    let mut intervals = intervals.into_iter();
-    if let Some(mut i) = intervals.next() {
-        for j in intervals {
-            if i.intersects(&j) {
-                i = ClosedInterval::new(*i.start().min(j.start()), *i.end().max(j.end()));
-            } else {
-                non_beacons += i.len();
-                non_beacons -= beacon_xs.iter().filter(|x| i.contains(x)).count();
-                i = j;
+
+    let intervals = merge_intervals(build_intervals(reports, y));
+    let mut non_beacons = intervals.iter().map(ClosedInterval::len).sum();
+    non_beacons -= beacon_xs
+        .iter()
+        .filter(|x| intervals.iter().any(|i| i.contains(x)))
+        .count();
+    non_beacons
+}
+
+pub fn solve_part2(
+    reports: &[SensorReport<i64>],
+    xrange: RangeInclusive<i64>,
+    yrange: RangeInclusive<i64>,
+) -> Result<i64> {
+    let mut ans = Err(Error::NoLocation);
+    for y in yrange {
+        let intervals = merge_intervals(build_intervals(reports, y));
+        match intervals.len() {
+            1 => {
+                if intervals[0].start() > xrange.start() || intervals[0].end() < xrange.end() {
+                    return Err(Error::MultipleLocations);
+                }
+            }
+            2 => {
+                if ans.is_err()
+                    && intervals[0].start() <= xrange.start()
+                    && intervals[0].end() + 2 == *intervals[1].start()
+                    && intervals[1].end() >= xrange.end()
+                {
+                    let x = *intervals[0].end() + 1;
+                    ans = Ok(x * 4_000_000 + y);
+                } else {
+                    return Err(Error::MultipleLocations);
+                }
+            }
+            _ => {
+                return Err(Error::MultipleLocations);
             }
         }
-        non_beacons += i.len();
-        non_beacons -= beacon_xs.iter().filter(|x| i.contains(x)).count();
     }
-    non_beacons
+    ans
 }
 
 #[cfg(test)]
@@ -243,11 +319,19 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let reports = parse_input(&input)?;
+        let num = solve_part2(&reports, 0..=20, 0..=20)?;
+        assert_eq!(num, 56000011);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let reports = parse_input(&input)?;
+        let num = solve_part2(&reports, 0..=4_000_000, 0..=4_000_000)?;
+        assert_eq!(num, 13171855019123);
+        Ok(())
     }
 }
