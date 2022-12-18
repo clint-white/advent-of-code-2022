@@ -2,7 +2,7 @@
 
 use std::io;
 
-use day18::*;
+use day18::{parse_input, solve_part1, solve_part2, Cube, Result};
 
 fn main() -> Result<()> {
     let input = io::read_to_string(io::stdin())?;

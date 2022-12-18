@@ -1,11 +1,12 @@
 //! Solutions to [Advent of Code 2022 Day 18](https://adventofcode.com/2022/day/18).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::io;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
+use ndarray::{Array3, ArrayViewMut3};
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -52,7 +53,7 @@ where
     fn from_str(s: &str) -> Result<Self> {
         let result: Result<Vec<_>> = s
             .split(',')
-            .map(|x| x.parse::<T>().map_err(|e| e.into()))
+            .map(|x| x.parse::<T>().map_err(Into::into))
             .collect();
         let mut coordinates = result?;
         let z = coordinates
@@ -69,6 +70,12 @@ where
     }
 }
 
+/// Parses input into a vector of cubes.
+///
+/// # Errors
+///
+/// Returns [`Error::Dimension`] if there are not exactly three integer coordinates per line.
+/// Returns [`Error::ParseInt`] if there was an error parsing an integer.
 pub fn parse_input<T, E>(s: &str) -> Result<Vec<Cube<T>>>
 where
     T: FromStr<Err = E>,
@@ -77,9 +84,9 @@ where
     s.lines().map(str::parse).collect()
 }
 
-pub type Face<T> = (T, T, T);
+type Face<T> = (T, T, T);
 
-pub fn boundary_faces<I>(cubes: I) -> (HashSet<Face<u8>>, HashSet<Face<u8>>, HashSet<Face<u8>>)
+fn boundary_faces<I>(cubes: I) -> (HashSet<Face<u8>>, HashSet<Face<u8>>, HashSet<Face<u8>>)
 where
     I: IntoIterator<Item = Cube<u8>>,
 {
@@ -120,58 +127,157 @@ where
     faces_yz.len() + faces_xz.len() + faces_xy.len()
 }
 
-pub fn external_cubes<I>(cubes: I) -> HashSet<Cube<u8>>
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+enum CubeKind {
+    Exterior,
+    Lava,
+    Interior,
+}
+
+fn mark_cubes<I>(lava: I) -> Array3<CubeKind>
 where
     I: IntoIterator<Item = Cube<u8>>,
 {
-    let cubes: HashSet<_> = cubes.into_iter().collect();
-    let endx = 2 + cubes.iter().map(|cube| cube.x).max().unwrap_or(0);
-    let endy = 2 + cubes.iter().map(|cube| cube.y).max().unwrap_or(0);
-    let endz = 2 + cubes.iter().map(|cube| cube.z).max().unwrap_or(0);
+    let lava: HashSet<_> = lava.into_iter().collect();
+    let xlimit = 2 + lava.iter().map(|cube| cube.x).max().unwrap_or(0) as usize;
+    let ylimit = 2 + lava.iter().map(|cube| cube.y).max().unwrap_or(0) as usize;
+    let zlimit = 2 + lava.iter().map(|cube| cube.z).max().unwrap_or(0) as usize;
 
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::new();
-    queue.push_back(Cube::<u8>::new(0, 0, 0));
-    while let Some(cube) = queue.pop_front() {
-        visited.insert(cube);
-        if let Some(x1) = cube.x.checked_sub(1) {
-            let neighbor = Cube::new(x1, cube.y, cube.z);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-        if cube.x < endx {
-            let neighbor = Cube::new(cube.x + 1, cube.y, cube.z);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-        if let Some(y1) = cube.y.checked_sub(1) {
-            let neighbor = Cube::new(cube.x, y1, cube.z);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-        if cube.y < endy {
-            let neighbor = Cube::new(cube.x, cube.y + 1, cube.z);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-        if let Some(z1) = cube.z.checked_sub(1) {
-            let neighbor = Cube::new(cube.x, cube.y, z1);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
-            }
-        }
-        if cube.z < endz {
-            let neighbor = Cube::new(cube.x, cube.y, cube.z + 1);
-            if !cubes.contains(&neighbor) && !visited.contains(&neighbor) {
-                queue.push_back(neighbor);
+    let mut array: Array3<Option<CubeKind>> = Array3::default((xlimit, ylimit, zlimit));
+
+    // Mark the lava cubes.
+    for cube in &lava {
+        let x = cube.x as usize;
+        let y = cube.y as usize;
+        let z = cube.z as usize;
+        array[[x, y, z]] = Some(CubeKind::Lava);
+    }
+
+    // Mark the outermost exterior cells.
+    initialize_boundary(&mut array.view_mut());
+
+    while update_exterior(&mut array.view_mut()) > 0 {}
+
+    let shape = array.raw_dim();
+    let data = array
+        .into_iter()
+        .map(|opt| opt.unwrap_or(CubeKind::Interior))
+        .collect();
+    Array3::from_shape_vec(shape, data).expect("the data can fit the shape")
+}
+
+fn update_exterior(array: &mut ArrayViewMut3<Option<CubeKind>>) -> usize {
+    let shape = array.shape();
+    let xlimit = shape[0];
+    let ylimit = shape[1];
+    let zlimit = shape[2];
+
+    let mut updated = 0;
+    for x in 1..xlimit {
+        for y in 0..ylimit {
+            for z in 0..zlimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x - 1, y, z]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
             }
         }
     }
-    visited
+    for x in (0..xlimit - 1).rev() {
+        for y in 0..ylimit {
+            for z in 0..zlimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x + 1, y, z]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
+            }
+        }
+    }
+    for y in 1..ylimit {
+        for x in 0..ylimit {
+            for z in 0..zlimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x, y - 1, z]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
+            }
+        }
+    }
+    for y in (0..ylimit - 1).rev() {
+        for x in 0..xlimit {
+            for z in 0..zlimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x, y + 1, z]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
+            }
+        }
+    }
+    for z in 1..zlimit {
+        for x in 0..xlimit {
+            for y in 0..ylimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x, y, z - 1]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
+            }
+        }
+    }
+    for z in (0..zlimit - 1).rev() {
+        for x in 0..xlimit {
+            for y in 0..ylimit {
+                if array[[x, y, z]].is_none()
+                    && matches!(array[[x, y, z + 1]], Some(CubeKind::Exterior))
+                {
+                    array[[x, y, z]] = Some(CubeKind::Exterior);
+                    updated += 1;
+                }
+            }
+        }
+    }
+    updated
+}
+
+fn initialize_boundary(array: &mut ArrayViewMut3<Option<CubeKind>>) {
+    let shape = array.shape();
+    let xlimit = shape[0];
+    let ylimit = shape[1];
+    let zlimit = shape[2];
+
+    // Mark the boundary
+    // yz planes
+    for y in 0..ylimit {
+        for z in 0..zlimit {
+            array[[0, y, z]] = Some(CubeKind::Exterior);
+            array[[xlimit - 1, y, z]] = Some(CubeKind::Exterior);
+        }
+    }
+
+    // xz planes
+    for x in 0..xlimit {
+        for z in 0..zlimit {
+            array[[x, 0, z]] = Some(CubeKind::Exterior);
+            array[[x, ylimit - 1, z]] = Some(CubeKind::Exterior);
+        }
+    }
+
+    // xy planes
+    for x in 0..xlimit {
+        for y in 0..ylimit {
+            array[[x, y, 0]] = Some(CubeKind::Exterior);
+            array[[x, y, zlimit - 1]] = Some(CubeKind::Exterior);
+        }
+    }
 }
 
 pub fn solve_part2<I>(cubes: I) -> usize
@@ -179,12 +285,24 @@ where
     I: IntoIterator<Item = Cube<u8>>,
 {
     let cubes: Vec<_> = cubes.into_iter().collect();
-    let exterior_cubes = external_cubes(cubes.clone());
-    let (ext_boundary_yz, ext_boundary_xz, ext_boundary_xy) = boundary_faces(exterior_cubes);
-    let (boundary_yz, boundary_xz, boundary_xy) = boundary_faces(cubes);
-    boundary_yz.intersection(&ext_boundary_yz).count()
-        + boundary_xz.intersection(&ext_boundary_xz).count()
-        + boundary_xy.intersection(&ext_boundary_xy).count()
+    let array = mark_cubes(cubes.clone());
+    let mut interior = Vec::new();
+    let shape = array.shape();
+    let xlimit = shape[0];
+    let ylimit = shape[1];
+    let zlimit = shape[2];
+    for x in 0..xlimit {
+        for y in 0..ylimit {
+            for z in 0..zlimit {
+                if matches!(array[[x, y, z]], CubeKind::Interior) {
+                    interior.push(Cube::new(x as u8, y as u8, z as u8));
+                }
+            }
+        }
+    }
+    let boundary_faces = solve_part1(cubes);
+    let interior_boundary_faces = solve_part1(interior);
+    boundary_faces - interior_boundary_faces
 }
 
 #[cfg(test)]
@@ -225,7 +343,7 @@ mod tests {
         let input = fs::read_to_string("data/input")?;
         let cubes = parse_input(&input)?;
         let surface_area = solve_part2(cubes);
-        assert_eq!(surface_area, 4242);
+        assert_eq!(surface_area, 2428);
         Ok(())
     }
 }
