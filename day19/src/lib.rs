@@ -222,6 +222,15 @@ pub fn solve_part1(blueprints: &[Blueprint]) -> usize {
         .sum()
 }
 
+#[must_use]
+pub fn solve_part2(blueprints: &[Blueprint]) -> usize {
+    blueprints
+        .par_iter()
+        .take(3)
+        .map(|blueprint| blueprint.optimize_geodes(32))
+        .sum()
+}
+
 /// Parses the puzzle input as a vector of [`Blueprint`]s.
 ///
 /// # Errors
@@ -267,6 +276,20 @@ impl Strategy {
         affordable
     }
 
+    /// Returns an array indicating which robots we will eventually be able to afford given what
+    /// robots we currently have.
+    fn eventually_affordable_robots(&self) -> ResourceArray<bool> {
+        let mut eventually_affordable = ResourceArray::default();
+        for i in 0..4 {
+            eventually_affordable.0[i] = self.costs.0[i]
+                .0
+                .iter()
+                .zip(self.robots.0.iter())
+                .all(|(&c, &r)| c == 0 || r > 0);
+        }
+        eventually_affordable
+    }
+
     /// Possibly converts resources into a robot and updates balances accordingly.
     fn update(&mut self, purchase: Option<ResourceKind>) {
         if let Some(kind) = purchase {
@@ -299,45 +322,53 @@ impl Strategy {
 #[must_use]
 pub fn optimize(blueprint: &Blueprint, time_limit: usize) -> Strategy {
     let mut strategy = Strategy::new(blueprint.costs, time_limit);
-    optimize_recursive(&mut strategy, ResourceArray::default())
+    optimize_recursive(&mut strategy, ResourceArray::default()).expect("there is a solution")
 }
 
 #[must_use]
-fn optimize_recursive(strategy: &mut Strategy, taboo: ResourceArray<bool>) -> Strategy {
+fn optimize_recursive(strategy: &mut Strategy, taboo: ResourceArray<bool>) -> Option<Strategy> {
     use ResourceKind::*;
 
     if strategy.purchases.len() >= strategy.time_limit {
-        return strategy.clone();
+        return Some(strategy.clone());
     }
 
     let is_affordable = strategy.affordable_robots();
 
     let mut purchases = Vec::new();
     if is_affordable[Geode] && !taboo[Geode] {
-        purchases.push(Some(Geode));
+        purchases.push((Some(Geode), ResourceArray::default()));
     }
     if is_affordable[Obsidian] && !taboo[Obsidian] {
-        purchases.push(Some(Obsidian));
+        purchases.push((Some(Obsidian), ResourceArray::default()));
     }
     if is_affordable[Clay] && !taboo[Clay] {
-        purchases.push(Some(Clay));
+        purchases.push((Some(Clay), ResourceArray::default()));
     }
     if is_affordable[Ore] && !taboo[Ore] {
-        purchases.push(Some(Ore));
+        purchases.push((Some(Ore), ResourceArray::default()));
     }
-    let mut best = Vec::new();
-    for purchase in purchases {
-        strategy.update(purchase);
-        best.push(optimize_recursive(strategy, ResourceArray::default()));
-        strategy.undo();
+    // We can do nothing *only if* we are saving for something which we cannot yet afford but which
+    // we already have the robots necessary to eventually afford.
+    if strategy
+        .eventually_affordable_robots()
+        .0
+        .iter()
+        .zip(is_affordable.0.iter())
+        .any(|(&eventually, &now)| eventually && !now)
+    {
+        purchases.push((None, is_affordable));
     }
-    strategy.update(None);
-    best.push(optimize_recursive(strategy, is_affordable));
-    strategy.undo();
 
-    best.into_iter()
+    purchases
+        .into_iter()
+        .filter_map(|(purchase, taboo)| {
+            strategy.update(purchase);
+            let best = optimize_recursive(strategy, taboo);
+            strategy.undo();
+            best
+        })
         .max_by_key(Strategy::geodes)
-        .expect("the list is nonempty")
 }
 
 #[cfg(test)]
