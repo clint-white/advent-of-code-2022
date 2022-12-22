@@ -45,9 +45,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinOp {
     Add,
-    Subtract,
-    Multiply,
-    Divide,
+    Sub,
+    Mul,
+    Div,
 }
 
 impl FromStr for BinOp {
@@ -56,9 +56,9 @@ impl FromStr for BinOp {
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "+" => Ok(Self::Add),
-            "-" => Ok(Self::Subtract),
-            "*" => Ok(Self::Multiply),
-            "/" => Ok(Self::Divide),
+            "-" => Ok(Self::Sub),
+            "*" => Ok(Self::Mul),
+            "/" => Ok(Self::Div),
             _ => Err(Error::ParseOp(s.into())),
         }
     }
@@ -116,9 +116,9 @@ where
             let b = eval(expressions, right)?;
             match op {
                 BinOp::Add => Some(a + b),
-                BinOp::Subtract => Some(a - b),
-                BinOp::Multiply => Some(a * b),
-                BinOp::Divide => Some(a / b),
+                BinOp::Sub => Some(a - b),
+                BinOp::Mul => Some(a * b),
+                BinOp::Div => Some(a / b),
             }
         }
     }
@@ -126,6 +126,150 @@ where
 
 pub fn solve_part1(expressions: &HashMap<String, Expression<i64>>) -> i64 {
     eval(expressions, "root").expect("the expression can be evaluated")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SymbolicExpression<T> {
+    Constant(T),
+    Variable(&'static str),
+    Operation {
+        left: Box<SymbolicExpression<T>>,
+        op: BinOp,
+        right: Box<SymbolicExpression<T>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Equation<T>(SymbolicExpression<T>, SymbolicExpression<T>);
+
+/// Returns a symbolic equation by converting a binary operation expression for `node` into an
+/// equality.
+pub fn build_equation<T>(
+    expressions: &HashMap<String, Expression<T>>,
+    node: &str,
+) -> Option<Equation<T>>
+where
+    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T>,
+{
+    let expr = expressions.get(node)?;
+    match expr {
+        // If the node is a simple expression, return no equation.
+        Expression::Simple(_) => None,
+        // If the node is a binary operation, convert it into an equality between the two sides of
+        // the operator.
+        Expression::Compound { left, op: _, right } => {
+            let lhs = build_symbolic_expression(expressions, left)?;
+            let rhs = build_symbolic_expression(expressions, right)?;
+            Some(Equation(lhs, rhs))
+        }
+    }
+}
+
+/// Build a symbolic expression where the expression for node `humn` is converted to a variable.
+pub fn build_symbolic_expression<T>(
+    expressions: &HashMap<String, Expression<T>>,
+    node: &str,
+) -> Option<SymbolicExpression<T>>
+where
+    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T>,
+{
+    if node == "humn" {
+        return Some(SymbolicExpression::Variable("x"));
+    };
+    let expr = expressions.get(node)?;
+    let symb_expr = match expr {
+        Expression::Simple(num) => SymbolicExpression::Constant(*num),
+        Expression::Compound { left, op, right } => {
+            let a = build_symbolic_expression(expressions, left)?;
+            let b = build_symbolic_expression(expressions, right)?;
+            match (a, b) {
+                (SymbolicExpression::Constant(a), SymbolicExpression::Constant(b)) => match op {
+                    BinOp::Add => SymbolicExpression::Constant(a + b),
+                    BinOp::Sub => SymbolicExpression::Constant(a - b),
+                    BinOp::Mul => SymbolicExpression::Constant(a * b),
+                    BinOp::Div => SymbolicExpression::Constant(a / b),
+                },
+                (a, b) => SymbolicExpression::Operation {
+                    left: Box::new(a),
+                    op: *op,
+                    right: Box::new(b),
+                },
+            }
+        }
+    };
+    Some(symb_expr)
+}
+
+pub fn reduce<T>(equation: Equation<T>) -> Equation<T>
+where
+    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T>,
+{
+    use SymbolicExpression::{Constant, Operation};
+
+    match (equation.0, equation.1) {
+        (Operation { left, op, right }, Constant(c)) => rewrite(*left, op, *right, c),
+        (Constant(a), Constant(b)) => Equation(Constant(a), Constant(b)),
+        (Constant(a), rhs) => reduce(Equation(rhs, Constant(a))),
+        (lhs, rhs) => Equation(lhs, rhs),
+    }
+}
+
+pub fn rewrite<T>(
+    left: SymbolicExpression<T>,
+    op: BinOp,
+    right: SymbolicExpression<T>,
+    c: T,
+) -> Equation<T>
+where
+    T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T>,
+{
+    use SymbolicExpression::{Constant, Operation};
+    match (left, right) {
+        (Constant(a), Constant(b)) => match op {
+            BinOp::Add => Equation(Constant(a + b), Constant(c)),
+            BinOp::Sub => Equation(Constant(a - b), Constant(c)),
+            BinOp::Mul => Equation(Constant(a * b), Constant(c)),
+            BinOp::Div => Equation(Constant(a / b), Constant(c)),
+        },
+        (Constant(a), rhs) => match op {
+            BinOp::Add => Equation(rhs, Constant(c - a)),
+            BinOp::Sub => Equation(rhs, Constant(a - c)),
+            BinOp::Mul => Equation(rhs, Constant(c / a)),
+            BinOp::Div => Equation(
+                Constant(a),
+                Operation {
+                    left: Box::new(rhs),
+                    op: BinOp::Mul,
+                    right: Box::new(Constant(c)),
+                },
+            ),
+        },
+        (lhs, Constant(b)) => match op {
+            BinOp::Add => Equation(lhs, Constant(c - b)),
+            BinOp::Sub => Equation(lhs, Constant(c + b)),
+            BinOp::Mul => Equation(lhs, Constant(c / b)),
+            BinOp::Div => Equation(lhs, Constant(c * b)),
+        },
+        (lop, rop) => Equation(
+            Operation {
+                left: Box::new(lop),
+                op,
+                right: Box::new(rop),
+            },
+            Constant(c),
+        ),
+    }
+}
+
+pub fn solve_part2(expressions: &HashMap<String, Expression<i64>>) -> Option<i64> {
+    let mut eqn = build_equation(expressions, "root").unwrap();
+    while !matches!(&eqn.0, SymbolicExpression::Variable(_)) {
+        eqn = reduce(eqn);
+    }
+    match eqn.1 {
+        SymbolicExpression::Constant(t) => Some(t),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -154,11 +298,19 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let exprs = parse_input(&input)?;
+        let ans = solve_part2(&exprs);
+        assert_eq!(ans, Some(301));
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let exprs = parse_input(&input)?;
+        let ans = solve_part2(&exprs);
+        assert_eq!(ans, Some(3378273370680));
+        Ok(())
     }
 }
