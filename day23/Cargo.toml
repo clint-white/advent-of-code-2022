@@ -1,0 +1,8 @@
+[package]
+name = "day23"
+version = "0.1.0"
+edition = "2021"
+description = "Advent of Code 2022 Day 23"
+
+[dependencies]
+thiserror = "1.0"
