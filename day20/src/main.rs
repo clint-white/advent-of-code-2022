@@ -2,12 +2,17 @@
 
 use std::io;
 
-use day20::*;
+use day20::{parse_input, solve_part1, solve_part2, Result};
 
 fn main() -> Result<()> {
     let input = io::read_to_string(io::stdin())?;
-    let nums = parse_input(&input)?;
-    println!("{:?}", &nums);
-    println!("{}", nums.len());
+    let mut nums = parse_input(&input)?;
+    let s = solve_part1(&mut nums).expect("the list of numbers contains 0");
+    println!("[Part 1] Sum of coordinates: {s}");
+
+    let mut nums = parse_input(&input)?;
+    let s = solve_part2(&mut nums).expect("the list of numbers contains 0");
+    println!("[Part 2] Sum of coordinates: {s}");
+
     Ok(())
 }
