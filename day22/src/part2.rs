@@ -203,8 +203,73 @@ pub fn glue_edges_example(graph: &mut Graph, grid: &Grid<Option<CellKind>>) {
 }
 
 pub fn glue_edges_input(graph: &mut Graph, grid: &Grid<Option<CellKind>>) {
+    use Heading::{Down, Left, Right, Up};
+
     assert_eq!(grid.num_rows(), 202);
     assert_eq!(grid.num_cols(), 152);
+    // A
+    glue_edges(
+        graph,
+        grid,
+        (1..51).map(|j| [101, j]),
+        Up,
+        (51..101).map(|i| [i, 51]),
+        Right,
+    );
+    // B
+    glue_edges(
+        graph,
+        grid,
+        (151..201).map(|i| [i, 50]),
+        Right,
+        (51..101).map(|j| [150, j]),
+        Up,
+    );
+    // C
+    glue_edges(
+        graph,
+        grid,
+        (51..101).map(|i| [i, 100]),
+        Right,
+        (101..151).map(|j| [50, j]),
+        Up,
+    );
+    // D
+    glue_edges(
+        graph,
+        grid,
+        (101..151).map(|i| [i, 1]),
+        Left,
+        (1..51).rev().map(|i| [i, 51]),
+        Right,
+    );
+    // E
+    glue_edges(
+        graph,
+        grid,
+        (151..201).map(|i| [i, 1]),
+        Left,
+        (51..101).map(|j| [1, j]),
+        Down,
+    );
+    // F
+    glue_edges(
+        graph,
+        grid,
+        (101..151).map(|i| [i, 100]),
+        Right,
+        (1..51).rev().map(|i| [i, 150]),
+        Left,
+    );
+    // G
+    glue_edges(
+        graph,
+        grid,
+        (1..51).map(|j| [200, j]),
+        Down,
+        (101..51).map(|j| [1, j]),
+        Down,
+    );
 }
 
 fn glue_edges<E1, E2>(
@@ -267,7 +332,7 @@ mod tests {
         let mut graph = build_graph(&grid)?;
         glue_edges_input(&mut graph, &grid);
         let password = solve(&graph, &instructions);
-        assert_eq!(password, 5031);
+        assert_eq!(password, 123149);
         Ok(())
     }
 }
