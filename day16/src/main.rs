@@ -11,5 +11,8 @@ fn main() -> Result<()> {
     let score = solve_part1(&graph);
     println!("[Part 1] Best strategy releases {score} pressure");
 
+    let score = solve_part2(&graph);
+    println!("[Part 2] Best tandem strategy releases {score} pressure");
+
     Ok(())
 }

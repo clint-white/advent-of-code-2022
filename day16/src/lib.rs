@@ -246,9 +246,12 @@ impl<'a> Path<'a> {
                 0
             }
         });
-        for neighbor in neighbors.into_iter().rev() {
-            steps.push(Step::Move(self.node, neighbor));
-        }
+        steps.extend(
+            neighbors
+                .into_iter()
+                .rev()
+                .map(|neighbor| Step::Move(self.node, neighbor)),
+        );
         steps
     }
 
@@ -286,33 +289,6 @@ fn find_optimal_strategy<'a>(graph: &'a Graph, start: &str, timeout: usize) -> P
     best
 }
 
-/*
-fn extend_loop<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
-    let mut stack = Vec::new();
-    stack.push(path.feasible_steps().into_iter());
-
-    loop {
-        let bound = path.bound_score();
-        if bound == path.score() || path.remaining() == 0 {
-            if path.score() > best.score() {
-                *best = path.clone();
-            }
-            path.pop();
-            continue;
-        }
-        if bound <= best.score() {
-            path.pop();
-            continue;
-        }
-        let mut steps = path.feasible_steps();
-        if let Some(step) = steps.next() {
-            stack.push(steps);
-        }
-
-    }
-}
-*/
-
 fn extend<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
     let bound = path.bound_score();
     if bound == path.score() || path.remaining() == 0 {
@@ -334,6 +310,253 @@ fn extend<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
 #[must_use]
 pub fn solve_part1(graph: &Graph) -> u64 {
     let strategy = find_optimal_strategy(graph, "AA", 30);
+    strategy.score
+}
+
+#[derive(Debug, Clone)]
+struct TandemPath<'a> {
+    timeout: usize,
+    steps: Vec<(Step, Step)>,
+    valve_states: Vec<ValveState>,
+    score: u64,
+    graph: &'a Graph,
+    nodes: (usize, usize),
+}
+
+impl<'a> TandemPath<'a> {
+    #[must_use]
+    fn new(graph: &'a Graph, start: &str, timeout: usize) -> Self {
+        let steps = Vec::with_capacity(timeout);
+        let valve_states = vec![ValveState::Closed; graph.num_nodes()];
+        let score = 0;
+        Self {
+            timeout,
+            steps,
+            valve_states,
+            score,
+            graph,
+            nodes: (graph.indices[start], graph.indices[start]),
+        }
+    }
+
+    #[inline]
+    fn score(&self) -> u64 {
+        self.score
+    }
+
+    #[inline]
+    fn remaining(&self) -> usize {
+        self.timeout - self.steps.len()
+    }
+
+    /// Returns an upper bound for the final score for the current partial solution.
+    ///
+    /// Any extension of the current solution will have a score not exceeding this value.
+    fn bound_score(&self) -> u64 {
+        let mut rates: Vec<_> = self
+            .valve_states
+            .iter()
+            .zip(self.graph.flow_rates.iter())
+            .filter_map(|(state, rate)| {
+                if matches!(state, ValveState::Closed) {
+                    Some(rate)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        rates.sort_unstable_by(|a, b| a.cmp(b).reverse());
+
+        self.score
+            + (0..self.remaining())
+                .rev()
+                .step_by(2)
+                .zip(rates.chunks(2))
+                .map(|(n, rates)| (n as u64) * (*rates[0] + **rates.get(1).unwrap_or(&&0)))
+                .sum::<u64>()
+    }
+
+    /// Sorts the neighbors of a node in decreasing order of the flow rates of their valves if the
+    /// valve is closed.
+    ///
+    /// If a valve is open, 0 is used instead.
+    fn sorted_neighbors(&self, node: usize, exclude: Option<usize>) -> Vec<usize> {
+        // Sort the neighbors by flow rate if their valve is closed.  Negate the flow rate so that
+        // we reverse the order.
+        let mut neighbors = self.graph.neighbors(node).to_vec();
+        if let Some(taboo) = exclude {
+            let i = neighbors
+                .iter()
+                .enumerate()
+                .find_map(|(i, &n)| if n == taboo { Some(i) } else { None })
+                .expect("the graph is undirected");
+            neighbors.remove(i);
+        }
+        neighbors.sort_by_key(|&idx| {
+            if matches!(self.valve_states[idx], ValveState::Closed) {
+                -(self.graph.flow_rate(idx) as isize)
+            } else {
+                0
+            }
+        });
+        neighbors
+    }
+
+    /// Returns `true` iff the valve at the given node is currently close and has a nonzero flow
+    /// rate.
+    fn valve_worth_opening(&self, node: usize) -> bool {
+        matches!(self.valve_states[node], ValveState::Closed) && self.graph.flow_rate(node) > 0
+    }
+
+    fn feasible_step_pairs(&self) -> Vec<(Step, Step)> {
+        let (you, elephant) = self.nodes;
+        let mut you_exclude = None;
+        let mut elephant_exclude = None;
+        if let Some((your_last, elephant_last)) = self.steps.last() {
+            if let Step::Move(from, _to) = your_last {
+                you_exclude = Some(from);
+            }
+            if let Step::Move(from, _to) = elephant_last {
+                elephant_exclude = Some(from);
+            }
+        }
+
+        let your_neighbors = self.sorted_neighbors(you, you_exclude.copied());
+        let elephant_neighbors = self.sorted_neighbors(elephant, elephant_exclude.copied());
+
+        let mut steps = Vec::new();
+
+        if self.valve_worth_opening(you) {
+            steps.extend(
+                elephant_neighbors
+                    .iter()
+                    .map(|&dest| (Step::OpenValve, Step::Move(elephant, dest))),
+            );
+        }
+
+        if self.valve_worth_opening(elephant) {
+            steps.extend(
+                your_neighbors
+                    .iter()
+                    .map(|&dest| (Step::Move(you, dest), Step::OpenValve)),
+            );
+        }
+
+        if you != elephant && self.valve_worth_opening(you) && self.valve_worth_opening(elephant) {
+            steps.push((Step::OpenValve, Step::OpenValve));
+        }
+
+        if you == elephant {
+            for i in 0..your_neighbors.len() {
+                for j in i..your_neighbors.len() {
+                    steps.push((
+                        Step::Move(you, your_neighbors[i]),
+                        Step::Move(elephant, your_neighbors[j]),
+                    ));
+                }
+            }
+        } else {
+            for &n1 in &your_neighbors {
+                for &n2 in &elephant_neighbors {
+                    steps.push((Step::Move(you, n1), Step::Move(elephant, n2)));
+                }
+            }
+        }
+        steps
+    }
+
+    /// Add the given pair of steps to the solution.
+    fn push_pair(&mut self, you: Step, elephant: Step) {
+        // XXX verify `self.remaining > 0`
+        match you {
+            Step::Move(_from, to) => {
+                // XXX verify `dest` is a neighbor of `node`
+                // XXX verify that self.node is currently `_from`
+                self.nodes.0 = to;
+            }
+            Step::OpenValve => {
+                // XXX verify valve is currently closed
+                self.valve_states[self.nodes.0] = ValveState::Open;
+                self.score += (self.remaining() - 1) as u64 * self.graph.flow_rate(self.nodes.0);
+            }
+        }
+        match elephant {
+            Step::Move(_from, to) => {
+                // XXX verify `dest` is a neighbor of `node`
+                // XXX verify that self.node is currently `_from`
+                self.nodes.1 = to;
+            }
+            Step::OpenValve => {
+                // XXX verify valve is currently closed
+                self.valve_states[self.nodes.1] = ValveState::Open;
+                self.score += (self.remaining() - 1) as u64 * self.graph.flow_rate(self.nodes.1);
+            }
+        }
+        self.steps.push((you, elephant));
+    }
+
+    /// Pop the previous pair of steps.
+    fn pop_pair(&mut self) -> Option<(Step, Step)> {
+        let (your_step, elephant_step) = self.steps.pop()?;
+        match your_step {
+            Step::Move(from, _to) => {
+                // verify that self.node is currently _to
+                self.nodes.0 = from;
+            }
+            Step::OpenValve => {
+                // XXX verify valve is currently open
+                self.valve_states[self.nodes.0] = ValveState::Closed;
+                self.score -= (self.remaining() - 1) as u64 * self.graph.flow_rate(self.nodes.0);
+            }
+        }
+
+        match elephant_step {
+            Step::Move(from, _to) => {
+                // verify that self.node is currently _to
+                self.nodes.1 = from;
+            }
+            Step::OpenValve => {
+                // XXX verify valve is currently open
+                self.valve_states[self.nodes.1] = ValveState::Closed;
+                self.score -= (self.remaining() - 1) as u64 * self.graph.flow_rate(self.nodes.1);
+            }
+        }
+        Some((your_step, elephant_step))
+    }
+}
+
+fn find_optimal_tandem_strategy<'a>(
+    graph: &'a Graph,
+    start: &str,
+    timeout: usize,
+) -> TandemPath<'a> {
+    let mut best = TandemPath::new(graph, start, timeout);
+    let mut path = TandemPath::new(graph, start, timeout);
+    extend_tandem(&mut path, &mut best);
+    best
+}
+
+fn extend_tandem<'a>(path: &mut TandemPath<'a>, best: &mut TandemPath<'a>) {
+    let bound = path.bound_score();
+    if bound == path.score() || path.remaining() == 0 {
+        if path.score() > best.score() {
+            *best = path.clone();
+        }
+        return;
+    }
+    if bound <= best.score() {
+        return;
+    }
+    for (you, elephant) in path.feasible_step_pairs() {
+        path.push_pair(you, elephant);
+        extend_tandem(path, best);
+        path.pop_pair();
+    }
+}
+
+#[must_use]
+pub fn solve_part2(graph: &Graph) -> u64 {
+    let strategy = find_optimal_tandem_strategy(graph, "AA", 26);
     strategy.score
 }
 
@@ -365,11 +588,21 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let reports = parse_input(&input)?;
+        let graph = build_graph(&reports);
+        let score = solve_part2(&graph);
+        assert_eq!(score, 1707);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let reports = parse_input(&input)?;
+        let graph = build_graph(&reports);
+        let score = solve_part2(&graph);
+        assert_eq!(score, 2824);
+        Ok(())
     }
 }
