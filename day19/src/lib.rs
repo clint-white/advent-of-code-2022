@@ -1,6 +1,8 @@
 //! Solutions to [Advent of Code 2022 Day 19](https://adventofcode.com/2022/day/19).
 
 use std::borrow::{Borrow, BorrowMut};
+use std::cmp::Ordering;
+use std::fmt;
 use std::io;
 use std::num::ParseIntError;
 use std::ops::{Add, AddAssign, Index, IndexMut, Sub, SubAssign};
@@ -51,6 +53,30 @@ pub enum ResourceKind {
 pub struct ResourceArray<T>([T; 4]);
 
 pub type ResourceMatrix<T> = ResourceArray<ResourceArray<T>>;
+
+impl<T> ResourceArray<T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.0.iter_mut()
+    }
+}
+
+impl<T: Ord> ResourceArray<T> {
+    /// Returns `true` iff every element of `self` is greater than or equal to the corresponding
+    /// element of `other`.
+    pub fn majorizes(&self, other: &Self) -> bool {
+        self.iter().zip(other.iter()).all(|(a, b)| a >= b)
+    }
+
+    /// Returns `true` iff every element of `self` is less than or equal to the corresponding
+    /// element of `other`.
+    pub fn minorizes(&self, other: &Self) -> bool {
+        self.iter().zip(other.iter()).all(|(a, b)| a <= b)
+    }
+}
 
 impl<T> Index<ResourceKind> for ResourceArray<T> {
     type Output = T;
@@ -108,9 +134,8 @@ impl<T: Add<Output = T> + Default> Add for ResourceArray<T> {
     fn add(self, other: Self) -> Self {
         let mut output = Self::default();
         output
-            .0
             .iter_mut()
-            .zip(self.0.into_iter().zip(other.0.into_iter()))
+            .zip(self.into_iter().zip(other.into_iter()))
             .for_each(|(out, (a, b))| *out = a + b);
         output
     }
@@ -118,9 +143,8 @@ impl<T: Add<Output = T> + Default> Add for ResourceArray<T> {
 
 impl<T: AddAssign> AddAssign for ResourceArray<T> {
     fn add_assign(&mut self, other: Self) {
-        self.0
-            .iter_mut()
-            .zip(other.0.into_iter())
+        self.iter_mut()
+            .zip(other.into_iter())
             .for_each(|(a, b)| *a += b);
     }
 }
@@ -131,9 +155,8 @@ impl<T: Sub<Output = T> + Default> Sub for ResourceArray<T> {
     fn sub(self, other: Self) -> Self {
         let mut output = Self::default();
         output
-            .0
             .iter_mut()
-            .zip(self.0.into_iter().zip(other.0.into_iter()))
+            .zip(self.into_iter().zip(other.into_iter()))
             .for_each(|(out, (a, b))| *out = a - b);
         output
     }
@@ -141,10 +164,19 @@ impl<T: Sub<Output = T> + Default> Sub for ResourceArray<T> {
 
 impl<T: SubAssign> SubAssign for ResourceArray<T> {
     fn sub_assign(&mut self, other: Self) {
-        self.0
-            .iter_mut()
-            .zip(other.0.into_iter())
+        self.iter_mut()
+            .zip(other.into_iter())
             .for_each(|(a, b)| *a -= b);
+    }
+}
+
+impl<T> IntoIterator for ResourceArray<T> {
+    type Item = T;
+
+    type IntoIter = std::array::IntoIter<T, 4>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -158,7 +190,7 @@ impl FromStr for Blueprint {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        use ResourceKind::*;
+        use ResourceKind::{Clay, Geode, Obsidian, Ore};
 
         let re = regex!(
             r"(?x)Blueprint\ (?P<id>\d+):\s*
@@ -203,13 +235,19 @@ impl Blueprint {
     /// Returns the maximum number of geodes that can be produced using this blueprint.
     #[must_use]
     pub fn optimize_geodes(&self, time_limit: usize) -> usize {
-        optimize(self, time_limit).geodes()
+        optimize_breadth_first(self, time_limit, 1_000).map_or(0, |state| state.geodes())
     }
 
     /// Returns the quality level of the blueprint.
     #[must_use]
     pub fn quality_level(&self, time_limit: usize) -> usize {
         self.id * self.optimize_geodes(time_limit)
+    }
+
+    /// Returns the id of this blueprint.
+    #[must_use]
+    pub fn id(&self) -> usize {
+        self.id
     }
 }
 
@@ -228,7 +266,7 @@ pub fn solve_part2(blueprints: &[Blueprint]) -> usize {
         .par_iter()
         .take(3)
         .map(|blueprint| blueprint.optimize_geodes(32))
-        .sum()
+        .product()
 }
 
 /// Parses the puzzle input as a vector of [`Blueprint`]s.
@@ -241,134 +279,179 @@ pub fn parse_input(s: &str) -> Result<Vec<Blueprint>> {
     s.lines().map(str::parse).collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Strategy {
-    purchases: Vec<Option<ResourceKind>>,
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct State {
+    resources: ResourceArray<usize>,
     robots: ResourceArray<usize>,
-    resource_balances: ResourceArray<usize>,
-    costs: ResourceMatrix<usize>,
-    time_limit: usize,
 }
 
-impl Strategy {
-    fn new(costs: ResourceMatrix<usize>, time_limit: usize) -> Self {
+impl Default for State {
+    fn default() -> Self {
         let mut robots = ResourceArray::default();
         robots[ResourceKind::Ore] = 1;
         Self {
-            purchases: Vec::new(),
+            resources: ResourceArray::default(),
             robots,
-            resource_balances: ResourceArray::default(),
-            costs,
-            time_limit,
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "State[ resources: ")?;
+        for n in self.resources.iter() {
+            write!(f, "{n} ")?;
+        }
+        write!(f, ", robots: ")?;
+        for n in self.robots.iter() {
+            write!(f, "{n} ")?;
+        }
+        write!(f, "]")
+    }
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        use ResourceKind::{Clay, Geode, Obsidian, Ore};
+        self.robots[Geode]
+            .cmp(&other.robots[Geode])
+            .then_with(|| self.resources[Geode].cmp(&other.resources[Geode]))
+            .then_with(|| self.robots[Obsidian].cmp(&other.robots[Obsidian]))
+            .then_with(|| self.resources[Obsidian].cmp(&other.resources[Obsidian]))
+            .then_with(|| self.robots[Clay].cmp(&other.robots[Clay]))
+            .then_with(|| self.resources[Clay].cmp(&other.resources[Clay]))
+            .then_with(|| self.robots[Ore].cmp(&other.robots[Ore]))
+            .then_with(|| self.resources[Ore].cmp(&other.resources[Ore]))
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl State {
+    /// Increases the number of each resource by the number of the corresponding robot.
+    pub fn appreciate(&mut self) {
+        self.resources += self.robots;
+    }
+
+    /// Returns a new state by exchasing some resources to purchases a robot.  Also generates new
+    /// resources from existing robots.
+    #[must_use]
+    pub fn buy_robot(&self, kind: ResourceKind, costs: &ResourceMatrix<usize>) -> Option<Self> {
+        if self.resources.majorizes(&costs[kind]) {
+            let mut robots = self.robots;
+            robots[kind] += 1;
+            let state = Self {
+                // Deduct the cost of the new robot, and add in more resources produced in one
+                // minute by each of the existing robots.
+                resources: self.resources - costs[kind] + self.robots,
+                robots,
+            };
+            Some(state)
+        } else {
+            None
         }
     }
 
-    /// Returns an array indicating which robots are affordable.
-    fn affordable_robots(&self) -> ResourceArray<bool> {
-        let mut affordable = ResourceArray::default();
-        for i in 0..4 {
-            affordable.0[i] = self.costs.0[i]
-                .0
-                .iter()
-                .zip(self.resource_balances.0.iter())
-                .all(|(a, b)| a <= b);
-        }
-        affordable
+    /// Returns the number of the given kind of resource.
+    #[must_use]
+    pub fn num_resource(&self, kind: ResourceKind) -> usize {
+        self.resources[kind]
     }
 
-    /// Returns an array indicating which robots we will eventually be able to afford given what
-    /// robots we currently have.
-    fn eventually_affordable_robots(&self) -> ResourceArray<bool> {
-        let mut eventually_affordable = ResourceArray::default();
-        for i in 0..4 {
-            eventually_affordable.0[i] = self.costs.0[i]
-                .0
-                .iter()
-                .zip(self.robots.0.iter())
-                .all(|(&c, &r)| c == 0 || r > 0);
-        }
-        eventually_affordable
-    }
-
-    /// Possibly converts resources into a robot and updates balances accordingly.
-    fn update(&mut self, purchase: Option<ResourceKind>) {
-        if let Some(kind) = purchase {
-            self.resource_balances -= self.costs[kind];
-        }
-        self.resource_balances += self.robots;
-        if let Some(kind) = purchase {
-            self.robots[kind] += 1;
-        }
-        self.purchases.push(purchase);
-    }
-
-    /// Undoes the last purchase.
-    fn undo(&mut self) -> Option<()> {
-        let purchase = self.purchases.pop()?;
-        if let Some(kind) = purchase {
-            self.robots[kind] -= 1;
-            self.resource_balances += self.costs[kind];
-        }
-        self.resource_balances -= self.robots;
-        Some(())
-    }
-
+    /// Returns the number of geodes.
     #[must_use]
     pub fn geodes(&self) -> usize {
-        self.resource_balances[ResourceKind::Geode]
+        self.num_resource(ResourceKind::Geode)
+    }
+
+    /// Returns `true` iff `self` has at least as much of every resource and robot type as `other`.
+    #[must_use]
+    pub fn dominates(&self, other: &Self) -> bool {
+        self.resources.majorizes(&other.resources) && self.robots.majorizes(&other.robots)
     }
 }
 
-#[must_use]
-pub fn optimize(blueprint: &Blueprint, time_limit: usize) -> Strategy {
-    let mut strategy = Strategy::new(blueprint.costs, time_limit);
-    optimize_recursive(&mut strategy, ResourceArray::default()).expect("there is a solution")
+/// Advances a state by one unit of time.
+///
+/// Returns all possible future states at one time unit later.
+fn advance(mut state: State, costs: &ResourceMatrix<usize>) -> Vec<State> {
+    use ResourceKind::{Clay, Geode, Obsidian, Ore};
+
+    let mut output = Vec::new();
+    if let Some(s) = state.buy_robot(Geode, costs) {
+        output.push(s);
+    }
+    if let Some(s) = state.buy_robot(Obsidian, costs) {
+        output.push(s);
+    }
+    if let Some(s) = state.buy_robot(Clay, costs) {
+        output.push(s);
+    }
+    if let Some(s) = state.buy_robot(Ore, costs) {
+        output.push(s);
+    }
+    state.appreciate();
+    output.push(state);
+    output
 }
 
-#[must_use]
-fn optimize_recursive(strategy: &mut Strategy, taboo: ResourceArray<bool>) -> Option<Strategy> {
-    use ResourceKind::*;
-
-    if strategy.purchases.len() >= strategy.time_limit {
-        return Some(strategy.clone());
-    }
-
-    let is_affordable = strategy.affordable_robots();
-
-    let mut purchases = Vec::new();
-    if is_affordable[Geode] && !taboo[Geode] {
-        purchases.push((Some(Geode), ResourceArray::default()));
-    }
-    if is_affordable[Obsidian] && !taboo[Obsidian] {
-        purchases.push((Some(Obsidian), ResourceArray::default()));
-    }
-    if is_affordable[Clay] && !taboo[Clay] {
-        purchases.push((Some(Clay), ResourceArray::default()));
-    }
-    if is_affordable[Ore] && !taboo[Ore] {
-        purchases.push((Some(Ore), ResourceArray::default()));
-    }
-    // We can do nothing *only if* we are saving for something which we cannot yet afford but which
-    // we already have the robots necessary to eventually afford.
-    if strategy
-        .eventually_affordable_robots()
-        .0
+/// Returns `true` iff `state` is dominated by another state.
+#[allow(unused)]
+fn is_dominated(state: &State, others: &[State]) -> bool {
+    others
         .iter()
-        .zip(is_affordable.0.iter())
-        .any(|(&eventually, &now)| eventually && !now)
-    {
-        purchases.push((None, is_affordable));
-    }
+        .any(|other| other.dominates(state) && other != state)
+}
 
-    purchases
+/// Returns only those states which are not dominated by any other state in the list.
+#[allow(unused)]
+fn prune(states: &[State]) -> Vec<State> {
+    states
+        .iter()
+        .filter(|state| !is_dominated(state, states))
+        .copied()
+        .collect()
+}
+
+/// Returns only those states which are not dominated by another state.
+///
+/// This function requires the states to be sorted first.
+#[allow(unused)]
+fn prune_sorted(states: &[State]) -> Vec<State> {
+    let mut pruned = Vec::new();
+    for state in states.iter() {
+        let ok = pruned.iter().all(|p: &State| !p.dominates(state));
+        if ok {
+            pruned.push(*state);
+        }
+    }
+    pruned
+}
+
+/// Returns the optimal state containing the most geodes after the given time limit.
+#[must_use]
+pub fn optimize_breadth_first(
+    blueprint: &Blueprint,
+    time_limit: usize,
+    stack_size: usize,
+) -> Option<State> {
+    let mut states = vec![State::default()];
+    for _ in 1..=time_limit {
+        let next_states: Vec<_> = states
+            .into_iter()
+            .flat_map(|state| advance(state, &blueprint.costs).into_iter())
+            .collect();
+        states = next_states;
+        states.par_sort_by(|a, b| a.cmp(b).reverse());
+        states = states.into_iter().take(stack_size).collect();
+    }
+    states
         .into_iter()
-        .filter_map(|(purchase, taboo)| {
-            strategy.update(purchase);
-            let best = optimize_recursive(strategy, taboo);
-            strategy.undo();
-            best
-        })
-        .max_by_key(Strategy::geodes)
+        .max_by_key(|state| state.num_resource(ResourceKind::Geode))
 }
 
 #[cfg(test)]
@@ -381,9 +464,9 @@ mod tests {
     fn test_optimize_geodes() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let blueprints = parse_input(&input)?;
-        let geodes = blueprints[0].optimize_geodes();
+        let geodes = blueprints[0].optimize_geodes(24);
         assert_eq!(geodes, 9);
-        let geodes = blueprints[1].optimize_geodes();
+        let geodes = blueprints[1].optimize_geodes(24);
         assert_eq!(geodes, 12);
         Ok(())
     }
@@ -408,11 +491,19 @@ mod tests {
 
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let blueprints = parse_input(&input)?;
+        let quality_sum = solve_part2(&blueprints);
+        assert_eq!(quality_sum, 3348);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/input")?;
+        let blueprints = parse_input(&input)?;
+        let quality_sum = solve_part2(&blueprints);
+        assert_eq!(quality_sum, 37191);
+        Ok(())
     }
 }
