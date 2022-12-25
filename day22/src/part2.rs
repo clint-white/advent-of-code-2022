@@ -267,7 +267,7 @@ pub fn glue_edges_input(graph: &mut Graph, grid: &Grid<Option<CellKind>>) {
         grid,
         (1..51).map(|j| [200, j]),
         Down,
-        (101..51).map(|j| [1, j]),
+        (101..151).map(|j| [1, j]),
         Down,
     );
 }
