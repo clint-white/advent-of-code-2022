@@ -40,20 +40,23 @@ pub enum Error {
 /// [`Result`]: std::result::Result
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub type Worry = u32;
+pub type Worry = u64;
+
+pub type Predicate = Box<dyn Fn(Worry) -> bool>;
+pub type Operation = Box<dyn Fn(Worry) -> Worry>;
 
 pub struct Monkey {
     items: VecDeque<Worry>,
-    op: Box<dyn Fn(Worry) -> Worry>,
-    predicate: Box<dyn Fn(Worry) -> bool>,
+    op: Operation,
+    predicate: Predicate,
+    modulus: Worry,
     send_to: [usize; 2],
     inspection_count: usize,
 }
 
 impl Monkey {
-    const RELAXATION_FACTOR: Worry = 3;
-
     /// Returns the number of items the monkey has inspected.
+    #[must_use]
     #[inline]
     pub fn inspection_count(&self) -> usize {
         self.inspection_count
@@ -68,16 +71,24 @@ impl Monkey {
     ///
     /// Returns the worry level of the item and the index of the monkey to which it is thrown, or
     /// `None` if there are no remaining items.
-    pub fn inspect_next_item(&mut self) -> Option<(Worry, usize)> {
+    pub fn inspect_next_item<R>(&mut self, relax: R) -> Option<(Worry, usize)>
+    where
+        R: Fn(Worry) -> Worry,
+    {
         let item = self.items.pop_front()?;
-        let worry = (self.op)(item) / Self::RELAXATION_FACTOR;
-        let next = self.send_to[(self.predicate)(worry) as usize];
+        let worry = relax((self.op)(item));
+        let next = self.send_to[usize::from((self.predicate)(worry))];
         self.inspection_count += 1;
         Some((worry, next))
     }
 
     pub fn push(&mut self, item: Worry) {
         self.items.push_back(item);
+    }
+
+    #[must_use]
+    pub fn modulus(&self) -> Worry {
+        self.modulus
     }
 }
 
@@ -86,49 +97,74 @@ impl Monkey {
 /// # Panics
 ///
 /// Panics if `i` is greater than or equal to the number of monkeys.
-pub fn take_turn(monkeys: &mut [Monkey], i: usize) -> usize {
+pub fn take_turn<R>(monkeys: &mut [Monkey], relax: R, i: usize) -> usize
+where
+    R: Fn(Worry) -> Worry,
+{
     let mut n = 0;
-    while let Some((item, destination)) = monkeys[i].inspect_next_item() {
+    while let Some((item, destination)) = monkeys[i].inspect_next_item(&relax) {
         monkeys[destination].push(item);
         n += 1;
     }
     n
 }
 
-pub fn do_round(monkeys: &mut [Monkey]) {
+pub fn do_round<R>(monkeys: &mut [Monkey], relax: R)
+where
+    R: Fn(Worry) -> Worry,
+{
     for i in 0..monkeys.len() {
-        take_turn(monkeys, i);
+        take_turn(monkeys, &relax, i);
     }
 }
 
 pub fn solve_part1(monkeys: &mut [Monkey]) -> usize {
     for _ in 0..20 {
-        do_round(monkeys);
+        do_round(monkeys, |x| x / 3);
     }
-    let mut num_inspected: Vec<_> = monkeys
-        .iter()
-        .map(|monkey| monkey.inspection_count())
-        .collect();
+    let mut num_inspected: Vec<_> = monkeys.iter().map(Monkey::inspection_count).collect();
     num_inspected.sort_unstable_by(|a, b| a.cmp(b).reverse());
     num_inspected[0] * num_inspected[1]
 }
 
+pub fn solve_part2(monkeys: &mut [Monkey]) -> usize {
+    let m: Worry = monkeys.iter().map(Monkey::modulus).product();
+    for _ in 0..10_000 {
+        do_round(monkeys, |x| x % m);
+    }
+    let mut num_inspected: Vec<_> = monkeys.iter().map(Monkey::inspection_count).collect();
+    num_inspected.sort_unstable_by(|a, b| a.cmp(b).reverse());
+    num_inspected[0] * num_inspected[1]
+}
+
+/// Parses puzzle into into a vector of [`Monkey`]s.
+///
+/// # Errors
+///
+/// This function returns an error if it could not parse the input as blank-line separated
+/// [`Monkey`]s.
 pub fn parse_input(s: &str) -> Result<Vec<Monkey>> {
     let blank_lines = regex!(r"\n{2,}");
     blank_lines.split(s).map(parse_monkey).collect()
 }
 
+/// Parses a single [`Monkey`] description.
+///
+/// # Errors
+///
+/// This function returns an error if `s` is not formatted properly.
 pub fn parse_monkey(s: &str) -> Result<Monkey> {
     let mut lines = s.lines();
     parse_monkey_start(next_line(&mut lines)?)?;
     let items = parse_starting_items(next_line(&mut lines)?)?;
     let op = parse_op(next_line(&mut lines)?)?;
-    let predicate = parse_predicate(next_line(&mut lines)?)?;
+    let (modulus, predicate) = parse_predicate(next_line(&mut lines)?)?;
     let send_to = parse_send_to(next_line(&mut lines)?, next_line(&mut lines)?)?;
     let monkey = Monkey {
         items,
         op,
         predicate,
+        modulus,
         send_to,
         inspection_count: 0,
     };
@@ -137,7 +173,7 @@ pub fn parse_monkey(s: &str) -> Result<Monkey> {
 
 /// Expects to find the start-of-monkey line
 ///
-/// ```
+/// ```text
 /// Monkey 0:
 /// ```
 fn parse_monkey_start(s: &str) -> Result<()> {
@@ -153,7 +189,7 @@ fn parse_monkey_start(s: &str) -> Result<()> {
 ///
 /// The line should like like the following:
 ///
-/// ```
+/// ```text
 ///   Starting items: 1, 2, 3
 /// ```
 fn parse_starting_items(s: &str) -> Result<VecDeque<Worry>> {
@@ -165,11 +201,11 @@ fn parse_starting_items(s: &str) -> Result<VecDeque<Worry>> {
     let comma = regex!(r",\s*");
     comma
         .split(list)
-        .map(|digits| digits.parse::<Worry>().map_err(|e| e.into()))
+        .map(|digits| digits.parse::<Worry>().map_err(Into::into))
         .collect()
 }
 
-fn parse_op(s: &str) -> Result<Box<dyn Fn(Worry) -> Worry>> {
+fn parse_op(s: &str) -> Result<Operation> {
     let re = regex!(
         r"\s*Operation:\s*new\s*=\s*(?P<left>old|\d+)\s*(?P<operator>\+|\*)\s*(?P<right>old|\d+)"
     );
@@ -213,11 +249,11 @@ fn parse_op(s: &str) -> Result<Box<dyn Fn(Worry) -> Worry>> {
     Ok(closure)
 }
 
-fn parse_predicate(s: &str) -> Result<Box<dyn Fn(Worry) -> bool>> {
+fn parse_predicate(s: &str) -> Result<(Worry, Predicate)> {
     let re = regex!(r"^\s*Test: divisible by (?P<divisor>\d+)");
     let caps = re.captures(s).ok_or_else(|| Error::Parse(s.into()))?;
     let m = caps["divisor"].parse::<Worry>()?;
-    Ok(Box::new(move |x| x % m == 0))
+    Ok((m, Box::new(move |x| x % m == 0)))
 }
 
 fn parse_send_to(first_line: &str, second_line: &str) -> Result<[usize; 2]> {
@@ -239,7 +275,7 @@ fn next_line<'a, L>(mut lines: L) -> Result<&'a str>
 where
     L: Iterator<Item = &'a str>,
 {
-    let line = lines.next().ok_or_else(|| Error::UnexpectedEndOfInput)?;
+    let line = lines.next().ok_or(Error::UnexpectedEndOfInput)?;
     Ok(line)
 }
 
@@ -261,7 +297,7 @@ mod tests {
     #[test]
     fn test_parse_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
-        let mut monkeys = parse_input(&input)?;
+        let monkeys = parse_input(&input)?;
         let current_items = items_to_vecs(&monkeys);
         assert_eq!(
             current_items,
@@ -279,7 +315,7 @@ mod tests {
     fn test_round1_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let mut monkeys = parse_input(&input)?;
-        do_round(&mut monkeys);
+        do_round(&mut monkeys, |x| x / 3);
         let current_items = items_to_vecs(&monkeys);
         assert_eq!(
             current_items,
@@ -297,8 +333,8 @@ mod tests {
     fn test_round2_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let mut monkeys = parse_input(&input)?;
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
         let current_items = items_to_vecs(&monkeys);
         assert_eq!(
             current_items,
@@ -316,12 +352,12 @@ mod tests {
     fn test_round6_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let mut monkeys = parse_input(&input)?;
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
-        do_round(&mut monkeys);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
+        do_round(&mut monkeys, |x| x / 3);
         let current_items = items_to_vecs(&monkeys);
         assert_eq!(
             current_items,
@@ -340,7 +376,7 @@ mod tests {
         let input = fs::read_to_string("data/example")?;
         let mut monkeys = parse_input(&input)?;
         for _ in 0..20 {
-            do_round(&mut monkeys);
+            do_round(&mut monkeys, |x| x / 3);
         }
         let current_items = items_to_vecs(&monkeys);
         assert_eq!(
@@ -377,13 +413,17 @@ mod tests {
     fn test_part2_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let mut monkeys = parse_input(&input)?;
-        todo!();
+        let ans = solve_part2(&mut monkeys);
+        assert_eq!(ans, 2713310158);
+        Ok(())
     }
 
     #[test]
     fn test_part2_input() -> Result<()> {
         let input = fs::read_to_string("data/input")?;
         let mut monkeys = parse_input(&input)?;
-        todo!();
+        let ans = solve_part2(&mut monkeys);
+        assert_eq!(ans, 20683044837);
+        Ok(())
     }
 }
