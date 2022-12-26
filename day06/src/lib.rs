@@ -70,6 +70,7 @@ pub fn solve_part2(bytes: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
 
     use super::*;
 
