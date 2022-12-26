@@ -32,6 +32,8 @@ pub enum Tree<T> {
     Branch(Vec<Tree<T>>),
 }
 
+pub type TreePair<T> = (Tree<T>, Tree<T>);
+
 impl<T: Ord> Ord for Tree<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -50,19 +52,7 @@ impl<T: Ord> Ord for Tree<T> {
                     Ordering::Greater
                 }
             }
-            (Tree::Branch(xs), leaf) => {
-                if let Some((x, rest)) = xs.split_first() {
-                    x.cmp(leaf).then_with(|| {
-                        if rest.is_empty() {
-                            Ordering::Equal
-                        } else {
-                            Ordering::Greater
-                        }
-                    })
-                } else {
-                    Ordering::Less
-                }
-            }
+            (branch, leaf) => leaf.cmp(branch).reverse(),
         }
     }
 }
@@ -74,7 +64,7 @@ impl<T: Ord> PartialOrd for Tree<T> {
 }
 
 #[must_use]
-pub fn solve_part1(pairs: &[(Tree<i32>, Tree<i32>)]) -> usize {
+pub fn solve_part1(pairs: &[TreePair<i32>]) -> usize {
     pairs
         .iter()
         .enumerate()
@@ -83,7 +73,7 @@ pub fn solve_part1(pairs: &[(Tree<i32>, Tree<i32>)]) -> usize {
 }
 
 #[must_use]
-pub fn solve_part2(pairs: Vec<(Tree<i32>, Tree<i32>)>) -> usize {
+pub fn solve_part2(pairs: Vec<TreePair<i32>>) -> usize {
     let divider2 = Tree::Branch(vec![Tree::Leaf(2)]);
     let divider6 = Tree::Branch(vec![Tree::Leaf(6)]);
     let mut packets = vec![divider2.clone(), divider6.clone()];
@@ -117,18 +107,18 @@ mod parser {
         IResult,
     };
 
-    use super::{Error, Result, Tree};
+    use super::{Error, Result, Tree, TreePair};
 
-    pub fn parse_input(s: &str) -> Result<Vec<(Tree<i32>, Tree<i32>)>> {
+    pub fn parse_input(s: &str) -> Result<Vec<TreePair<i32>>> {
         let (_, values) = all_consuming(parse_pairs)(s).map_err(|_| Error::Parse)?;
         Ok(values)
     }
 
-    fn parse_pairs(s: &str) -> IResult<&str, Vec<(Tree<i32>, Tree<i32>)>> {
+    fn parse_pairs(s: &str) -> IResult<&str, Vec<TreePair<i32>>> {
         separated_list0(newline, parse_pair)(s)
     }
 
-    fn parse_pair(s: &str) -> IResult<&str, (Tree<i32>, Tree<i32>)> {
+    fn parse_pair(s: &str) -> IResult<&str, TreePair<i32>> {
         tuple((
             terminated(parse_tree, newline),
             terminated(parse_tree, newline),
