@@ -2,15 +2,15 @@
 
 use std::io;
 
-use day14::{parse_input, solve_part1, solve_part2, Result};
+use day14::{parse_input, part1, part2, Result};
 
 fn main() -> Result<()> {
     let input = io::read_to_string(io::stdin())?;
     let paths = parse_input(&input)?;
-    let count = solve_part1(&paths)?;
+    let count = part1::solve(&paths)?;
     println!("[Part 1] Number of grands of sand that come to rest: {count}");
 
-    let count = solve_part2(&paths)?;
+    let count = part2::solve(&paths)?;
     println!("[Part 2] Number of grands of sand that come to rest: {count}");
 
     Ok(())

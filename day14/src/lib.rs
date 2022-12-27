@@ -1,8 +1,10 @@
 //! Solutions to [Advent of Code 2022 Day 14](https://adventofcode.com/2022/day/14).
 
+use std::cmp::{max, min};
 use std::io;
 
 pub use ndarray::Array2;
+use ndarray::{s, ArrayViewMut2};
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -33,39 +35,52 @@ pub fn parse_input(s: &str) -> Result<Vec<Vec<Point<usize>>>> {
     Ok(paths)
 }
 
-pub use part1::solve_part1;
+fn bounding_box<T>(paths: &[Vec<Point<T>>]) -> Point<T>
+where
+    T: Copy + Ord + Default,
+{
+    let maxx = paths
+        .iter()
+        .flat_map(|line| line.iter().map(|&(x, _)| x))
+        .max()
+        .unwrap_or_else(T::default);
+    let maxy = paths
+        .iter()
+        .flat_map(|line| line.iter().map(|&(_, y)| y))
+        .max()
+        .unwrap_or_else(T::default);
+    (maxx, maxy)
+}
+
+fn update_path(path: &[Point<usize>], mut occupied: ArrayViewMut2<bool>) -> Result<()> {
+    for coordinates in path.windows(2) {
+        let (x0, y0) = coordinates[0];
+        let (x1, y1) = coordinates[1];
+        if x0 == x1 {
+            occupied
+                .slice_mut(s![x0, min(y0, y1)..=max(y0, y1)])
+                .fill(true);
+        } else if y0 == y1 {
+            occupied
+                .slice_mut(s![min(x0, x1)..=max(x0, x1), y0])
+                .fill(true);
+        } else {
+            return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
+        }
+    }
+    Ok(())
+}
 
 pub mod part1 {
-    use std::cmp::{max, min};
-
     use ndarray::Array2;
 
-    use crate::{Error, Point, Result};
+    use crate::{bounding_box, update_path, Point, Result};
 
     fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
-        let maxx = paths
-            .iter()
-            .flat_map(|line| line.iter().map(|&(x, _)| x))
-            .max()
-            .unwrap_or(0);
-        let maxy = paths
-            .iter()
-            .flat_map(|line| line.iter().map(|&(_, y)| y))
-            .max()
-            .unwrap_or(0);
+        let (maxx, maxy) = bounding_box(paths);
         let mut occupied: Array2<bool> = Array2::default((maxx + 2, maxy + 1));
         for path in paths {
-            for coordinates in path.windows(2) {
-                let (x0, y0) = coordinates[0];
-                let (x1, y1) = coordinates[1];
-                if x0 == x1 {
-                    (min(y0, y1)..=max(y0, y1)).for_each(|y| occupied[[x0, y]] = true);
-                } else if y0 == y1 {
-                    (min(x0, x1)..=max(x0, x1)).for_each(|x| occupied[[x, y0]] = true);
-                } else {
-                    return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
-                }
-            }
+            update_path(path, occupied.view_mut())?;
         }
         Ok(occupied)
     }
@@ -88,7 +103,7 @@ pub mod part1 {
         }
     }
 
-    pub fn solve_part1(paths: &[Vec<Point<usize>>]) -> Result<usize> {
+    pub fn solve(paths: &[Vec<Point<usize>>]) -> Result<usize> {
         let mut occupied = build_array(paths)?;
         let mut count = 0;
         while drop_sand(&mut occupied, (500, 0)) {
@@ -98,41 +113,18 @@ pub mod part1 {
     }
 }
 
-pub use part2::solve_part2;
-
 pub mod part2 {
-    use std::cmp::{max, min};
+    use ndarray::{s, Array2};
 
-    use ndarray::Array2;
-
-    use crate::{Error, Point, Result};
+    use crate::{bounding_box, update_path, Point, Result};
 
     fn build_array(paths: &[Vec<Point<usize>>]) -> Result<Array2<bool>> {
-        let maxx = paths
-            .iter()
-            .flat_map(|line| line.iter().map(|&(x, _)| x))
-            .max()
-            .unwrap_or(0);
-        let maxy = paths
-            .iter()
-            .flat_map(|line| line.iter().map(|&(_, y)| y))
-            .max()
-            .unwrap_or(0);
+        let (maxx, maxy) = bounding_box(paths);
         let mut occupied: Array2<bool> = Array2::default((maxx + maxy + 1, maxy + 3));
         for path in paths {
-            for coordinates in path.windows(2) {
-                let (x0, y0) = coordinates[0];
-                let (x1, y1) = coordinates[1];
-                if x0 == x1 {
-                    (min(y0, y1)..=max(y0, y1)).for_each(|y| occupied[[x0, y]] = true);
-                } else if y0 == y1 {
-                    (min(x0, x1)..=max(x0, x1)).for_each(|x| occupied[[x, y0]] = true);
-                } else {
-                    return Err(Error::InvalidSegment((x0, y0), (x1, y1)));
-                }
-            }
+            update_path(path, occupied.view_mut())?;
         }
-        (0..maxx + maxy + 1).for_each(|x| occupied[[x, maxy + 2]] = true);
+        occupied.slice_mut(s![.., -1]).fill(true);
         Ok(occupied)
     }
 
@@ -155,7 +147,7 @@ pub mod part2 {
         }
     }
 
-    pub fn solve_part2(paths: &[Vec<Point<usize>>]) -> Result<usize> {
+    pub fn solve(paths: &[Vec<Point<usize>>]) -> Result<usize> {
         let mut occupied = build_array(paths)?;
         let mut count = 0;
         while drop_sand(&mut occupied, (500, 0)) {
@@ -207,7 +199,7 @@ mod tests {
     fn test_part1_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let paths = parse_input(&input)?;
-        let count = solve_part1(&paths)?;
+        let count = part1::solve(&paths)?;
         assert_eq!(count, 24);
         Ok(())
     }
@@ -216,7 +208,7 @@ mod tests {
     fn test_part1_input() -> Result<()> {
         let input = fs::read_to_string("data/input")?;
         let paths = parse_input(&input)?;
-        let count = solve_part1(&paths)?;
+        let count = part1::solve(&paths)?;
         assert_eq!(count, 979);
         Ok(())
     }
@@ -225,7 +217,7 @@ mod tests {
     fn test_part2_example() -> Result<()> {
         let input = fs::read_to_string("data/example")?;
         let paths = parse_input(&input)?;
-        let count = solve_part2(&paths)?;
+        let count = part2::solve(&paths)?;
         assert_eq!(count, 93);
         Ok(())
     }
@@ -234,7 +226,7 @@ mod tests {
     fn test_part2_input() -> Result<()> {
         let input = fs::read_to_string("data/input")?;
         let paths = parse_input(&input)?;
-        let count = solve_part2(&paths)?;
+        let count = part2::solve(&paths)?;
         assert_eq!(count, 29044);
         Ok(())
     }
