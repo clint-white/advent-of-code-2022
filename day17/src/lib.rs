@@ -9,8 +9,6 @@ use std::vec;
 
 use thiserror::Error;
 
-// const FILLED: char = '▓';
-// const EMPTY: char = '░';
 const FILLED: char = '#';
 const EMPTY: char = '.';
 
@@ -293,14 +291,6 @@ impl<const N: usize> Board<N> {
         let rock = self.rocks.next().expect("the rocks cycle endlessly");
         self.rock_count += 1;
         self.drop_rock(rock);
-        /*
-        dbg!(
-            self.jet_count,
-            self.jet_count % 10091,
-            self.rock_count,
-            self.rock_count % 5
-        );
-        */
     }
 
     pub fn do_rounds(&mut self, num_rounds: usize) {
@@ -309,32 +299,58 @@ impl<const N: usize> Board<N> {
         });
     }
 
+    /// Returns the "effective board".
+    ///
+    /// A cell is "effectively open" (false in the row array) if it can be reached from the open
+    /// cells of the top row by a path that always moves either down, left, or right and never
+    /// crosses a filled cell.  A cell is "effectively filled" is one what cannot be reached by
+    /// such a path.
+    ///
+    /// Cells which are filled in the board remain effectively filled.  On the other hand, open
+    /// cells on the board which are within a region completely surrounded by filled cells and thus
+    /// not reachable from the top row are effectively closed.
+    ///
+    /// When determining the state of the board, we can restrict our attention to the effective
+    /// board, since any cell which is effectively filled cannot affect the path of a falling rock,
+    /// regardless of whether the cell is actually filled or not.
+    ///
+    /// Furthermore, the effective board contains only enough rows to reach an effective floor
+    /// (i.e., a row of all filled cells in the effective board).
+    ///
+    /// As far as future falling rocks are concerned, the board can be replaced with the effective
+    /// board without changing the path of the rock.
+    #[must_use]
+    pub fn effective_rows(&self) -> Vec<[bool; N]> {
+        let mut effective = vec![];
+        for filled in self.rows.iter().rev() {
+            let mut current = [true; N];
+            let last = effective.last().unwrap_or(&[false; N]);
+            for i in 0..N - 3 {
+                current[i] = filled[i] || last[i];
+            }
+            for i in 1..N - 3 {
+                current[i] = filled[i] || current[i - 1];
+            }
+            for i in (0..N - 4).rev() {
+                current[i] = filled[i] || current[i + 1];
+            }
+            let done = current.iter().all(|&t| t);
+            effective.push(current);
+            if done {
+                break;
+            }
+        }
+        effective.into_iter().rev().collect()
+    }
+
     #[must_use]
     pub fn state(&self) -> State<N> {
-        let top_floor = self.find_floor();
-        let rows = self.rows[top_floor..].to_vec();
+        let rows = self.effective_rows();
         State {
             rows,
             jet_count: self.jet_count % self.jet_period,
             rock_count: self.rock_count % self.rock_period,
         }
-    }
-
-    /// Finds the highest row of all rocks.
-    #[must_use]
-    pub fn find_floor(&self) -> usize {
-        self.rows
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(k, row)| {
-                if row[1..N - 4].iter().all(|&t| t) {
-                    Some(k)
-                } else {
-                    None
-                }
-            })
-            .expect("The board has a rocky floor")
     }
 }
 
@@ -358,7 +374,7 @@ pub fn solve_part2(shifts: Vec<Shift>, num_rounds: usize) -> Option<usize> {
     let rocks = ROCK_SHAPES.to_vec();
     let mut board = Board::<12>::new(shifts, rocks);
     let mut states = HashMap::new();
-    for round in 1.. {
+    for round in 1..num_rounds {
         board.do_round();
         let state = board.state();
         let height = board.find_peak();
@@ -401,19 +417,21 @@ mod tests {
         Ok(())
     }
 
-    /*
     #[test]
     fn test_part2_example() -> Result<()> {
-        todo!();
+        let input = fs::read_to_string("data/example")?;
+        let shifts = parse_input(&input)?;
+        let height = solve_part2(shifts, 1_000_000_000_000);
+        assert_eq!(height, Some(1_514_285_714_288));
+        Ok(())
     }
-    */
 
     #[test]
     fn test_part2_input() -> Result<()> {
         let input = fs::read_to_string("data/input")?;
         let shifts = parse_input(&input)?;
         let height = solve_part2(shifts, 1_000_000_000_000);
-        assert_eq!(height, Some(1523615160362));
+        assert_eq!(height, Some(1_523_615_160_362));
         Ok(())
     }
 }
