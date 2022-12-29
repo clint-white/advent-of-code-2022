@@ -1,5 +1,7 @@
 //! Solutions to [Advent of Code 2022 Day 15](https://adventofcode.com/2022/day/15).
 
+#![allow(clippy::similar_names)]
+
 use std::collections::HashSet;
 use std::io;
 use std::num::ParseIntError;
@@ -114,6 +116,26 @@ where
     }
 }
 
+impl SensorReport<i64> {
+    /// Returns the intersection of the sensor's l1 disk with the given row, or `None`.
+    ///
+    /// The disk is centered on the report's sensor and has radius equal to the distance from the
+    /// sensort to the sensor's closest beacon.
+    #[must_use]
+    pub fn row_intersection(&self, row: i64) -> Option<ClosedInterval<i64>> {
+        let d = (self.sensor.y - row).abs();
+        let radius = self.radius();
+        if radius >= d {
+            Some(ClosedInterval::new(
+                self.sensor.x - (radius - d),
+                self.sensor.x + (radius - d),
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 pub fn parse_input(s: &str) -> Result<Vec<SensorReport<i64>>> {
     s.lines().map(str::parse).collect()
 }
@@ -198,28 +220,10 @@ impl IntoIterator for ClosedInterval<i64> {
     }
 }
 
+/// Returns a set of non-intersecting closed intervals whose union is the same as the input
+/// intervals.
 #[must_use]
-pub fn build_intervals(reports: &[SensorReport<i64>], y: i64) -> Vec<ClosedInterval<i64>> {
-    reports
-        .iter()
-        .filter_map(|report| {
-            let sensor = report.sensor();
-            let radius = report.radius();
-            let d = (sensor.y - y).abs();
-            if radius >= d {
-                Some(ClosedInterval::new(
-                    sensor.x - (radius - d),
-                    sensor.x + (radius - d),
-                ))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-#[must_use]
-pub fn merge_intervals(mut intervals: Vec<ClosedInterval<i64>>) -> Vec<ClosedInterval<i64>> {
+fn merge_intervals(mut intervals: Vec<ClosedInterval<i64>>) -> Vec<ClosedInterval<i64>> {
     intervals.sort_unstable();
     let mut merged = Vec::new();
     let mut intervals = intervals.into_iter();
@@ -237,8 +241,15 @@ pub fn merge_intervals(mut intervals: Vec<ClosedInterval<i64>>) -> Vec<ClosedInt
     merged
 }
 
+#[must_use]
 pub fn solve_part1(reports: &[SensorReport<i64>], y: i64) -> usize {
-    // Find the beacon positions.
+    let intervals = reports
+        .iter()
+        .filter_map(|report| report.row_intersection(y))
+        .collect();
+    let disjoint = merge_intervals(intervals);
+    let mut non_beacons = disjoint.iter().map(ClosedInterval::len).sum();
+    // Find the beacon positions on the target row.
     let beacon_xs: HashSet<_> = reports
         .iter()
         .filter_map(|report| {
@@ -249,13 +260,12 @@ pub fn solve_part1(reports: &[SensorReport<i64>], y: i64) -> usize {
             }
         })
         .collect();
-
-    let intervals = merge_intervals(build_intervals(reports, y));
-    let mut non_beacons = intervals.iter().map(ClosedInterval::len).sum();
+    // Subtract the number of beacons whose x-coordinate occurs in one of the intervals.
     non_beacons -= beacon_xs
         .iter()
-        .filter(|x| intervals.iter().any(|i| i.contains(x)))
+        .filter(|x| disjoint.iter().any(|i| i.contains(x)))
         .count();
+
     non_beacons
 }
 
@@ -266,20 +276,26 @@ pub fn solve_part2(
 ) -> Result<i64> {
     let mut ans = Err(Error::NoLocation);
     for y in yrange {
-        let intervals = merge_intervals(build_intervals(reports, y));
-        match intervals.len() {
+        let intervals = reports
+            .iter()
+            .filter_map(|report| report.row_intersection(y))
+            .collect();
+        let disjoint = merge_intervals(intervals);
+        match disjoint.len() {
             1 => {
-                if intervals[0].start() > xrange.start() || intervals[0].end() < xrange.end() {
+                let lower_gap = xrange.start().max(disjoint[0].start()) - xrange.start();
+                let upper_gap = xrange.end() - xrange.end().min(disjoint[0].end());
+                if upper_gap - lower_gap > 1 {
                     return Err(Error::MultipleLocations);
                 }
             }
             2 => {
                 if ans.is_err()
-                    && intervals[0].start() <= xrange.start()
-                    && intervals[0].end() + 2 == *intervals[1].start()
-                    && intervals[1].end() >= xrange.end()
+                    && disjoint[0].start() <= xrange.start()
+                    && disjoint[0].end() + 2 == *disjoint[1].start()
+                    && disjoint[1].end() >= xrange.end()
                 {
-                    let x = *intervals[0].end() + 1;
+                    let x = *disjoint[0].end() + 1;
                     ans = Ok(x * 4_000_000 + y);
                 } else {
                     return Err(Error::MultipleLocations);
