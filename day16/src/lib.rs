@@ -1,11 +1,13 @@
 //! Solutions to [Advent of Code 2022 Day 16](https://adventofcode.com/2022/day/16).
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
 use once_cell::sync::OnceCell;
+use rayon::prelude::*;
 use regex::Regex;
 use thiserror::Error;
 
@@ -194,7 +196,7 @@ impl<'a> Path<'a> {
         self.timeout - self.steps.len()
     }
 
-    /// And the given step to the solution.
+    /// Add the given step to the solution.
     fn push(&mut self, step: Step) {
         // XXX verify `self.remaining > 0`
         match step {
@@ -237,20 +239,11 @@ impl<'a> Path<'a> {
         {
             steps.push(Step::OpenValve);
         }
-        // Sort the neighbors by flow rate if their valve is closed
-        let mut neighbors = self.graph.neighbors(self.node).to_vec();
-        neighbors.sort_by_key(|&node| {
-            if matches!(self.valve_states[node], ValveState::Closed) {
-                self.graph.flow_rate(node)
-            } else {
-                0
-            }
-        });
+        let neighbors = self.graph.neighbors(self.node);
         steps.extend(
             neighbors
-                .into_iter()
-                .rev()
-                .map(|neighbor| Step::Move(self.node, neighbor)),
+                .iter()
+                .map(|&neighbor| Step::Move(self.node, neighbor)),
         );
         steps
     }
@@ -282,14 +275,32 @@ impl<'a> Path<'a> {
     }
 }
 
+/// Find the strategy that releases the most pressure.
+///
+/// This function uses a combination of a fast, suboptimal beam search and a slower, complete
+/// backtracking algorithm to find the optimal solution.  The beam search finds a near-optimal
+/// solution very quickly, which allows pruning poor partial solutions earlier in backtrack search
+/// than otherwise would be possible.  This leads to a substantial performance improvement.
 fn find_optimal_strategy<'a>(graph: &'a Graph, start: &str, timeout: usize) -> Path<'a> {
-    let mut best = Path::new(graph, start, timeout);
-    let mut path = Path::new(graph, start, timeout);
-    extend(&mut path, &mut best);
-    best
+    // Quickly find a near-optimal solution with a beam search.
+    let best = beam_search(graph, start, timeout, 100);
+    let path = Path::new(graph, start, timeout);
+    // Search under each child of the tree root in its own thread.
+    path.feasible_steps()
+        .into_par_iter()
+        .map(|step| {
+            let mut b = best.clone();
+            let mut p = path.clone();
+            p.push(step);
+            search_with_backtrack(&mut p, &mut b);
+            b
+        })
+        .max_by_key(Path::score)
+        .unwrap()
 }
 
-fn extend<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
+/// Extends `path` with backtracking, updating the global best solution.
+fn search_with_backtrack<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
     let bound = path.bound_score();
     if bound == path.score() || path.remaining() == 0 {
         if path.score() > best.score() {
@@ -302,9 +313,36 @@ fn extend<'a>(path: &mut Path<'a>, best: &mut Path<'a>) {
     }
     for step in path.feasible_steps() {
         path.push(step);
-        extend(path, best);
+        search_with_backtrack(path, best);
         path.pop();
     }
+}
+
+/// Performs a beam search with given beam width and returns the best solution.
+///
+/// Extends every partial solution in every possible way, and keeps the best `width` of the
+/// extended solutions.
+fn beam_search<'a>(graph: &'a Graph, start: &str, timeout: usize, width: usize) -> Path<'a> {
+    let mut stack = vec![Path::new(graph, start, timeout)];
+    for _ in 0..timeout {
+        let mut children = next_generation(&stack);
+        children.sort_unstable_by_key(|p| Reverse(p.score()));
+        stack = children.into_iter().take(width).collect();
+    }
+    stack.swap_remove(0)
+}
+
+/// Steps a list of partial solutions forward one step and returns a vector of the new solutions.
+fn next_generation<'a>(stack: &[Path<'a>]) -> Vec<Path<'a>> {
+    let mut children = vec![];
+    for path in stack.iter() {
+        for step in path.feasible_steps() {
+            let mut p = path.clone();
+            p.push(step);
+            children.push(p);
+        }
+    }
+    children
 }
 
 #[must_use]
@@ -530,13 +568,22 @@ fn find_optimal_tandem_strategy<'a>(
     start: &str,
     timeout: usize,
 ) -> TandemPath<'a> {
-    let mut best = TandemPath::new(graph, start, timeout);
-    let mut path = TandemPath::new(graph, start, timeout);
-    extend_tandem(&mut path, &mut best);
-    best
+    let best = tandem_beam_search(graph, start, timeout, 100);
+    let path = TandemPath::new(graph, start, timeout);
+    path.feasible_step_pairs()
+        .into_par_iter()
+        .map(|(you, elephant)| {
+            let mut p = path.clone();
+            p.push_pair(you, elephant);
+            let mut b = best.clone();
+            search_tandem_with_backtracking(&mut p, &mut b);
+            b
+        })
+        .max_by_key(TandemPath::score)
+        .unwrap()
 }
 
-fn extend_tandem<'a>(path: &mut TandemPath<'a>, best: &mut TandemPath<'a>) {
+fn search_tandem_with_backtracking<'a>(path: &mut TandemPath<'a>, best: &mut TandemPath<'a>) {
     let bound = path.bound_score();
     if bound == path.score() || path.remaining() == 0 {
         if path.score() > best.score() {
@@ -549,9 +596,36 @@ fn extend_tandem<'a>(path: &mut TandemPath<'a>, best: &mut TandemPath<'a>) {
     }
     for (you, elephant) in path.feasible_step_pairs() {
         path.push_pair(you, elephant);
-        extend_tandem(path, best);
+        search_tandem_with_backtracking(path, best);
         path.pop_pair();
     }
+}
+
+fn tandem_beam_search<'a>(
+    graph: &'a Graph,
+    start: &str,
+    timeout: usize,
+    width: usize,
+) -> TandemPath<'a> {
+    let mut stack = vec![TandemPath::new(graph, start, timeout)];
+    for _ in 0..timeout {
+        let mut children = next_tandem_generation(&stack);
+        children.sort_unstable_by_key(|p| Reverse(p.score()));
+        stack = children.into_iter().take(width).collect();
+    }
+    stack.swap_remove(0)
+}
+
+fn next_tandem_generation<'a>(stack: &[TandemPath<'a>]) -> Vec<TandemPath<'a>> {
+    let mut children = vec![];
+    for path in stack.iter() {
+        for (a, b) in path.feasible_step_pairs() {
+            let mut p = path.clone();
+            p.push_pair(a, b);
+            children.push(p);
+        }
+    }
+    children
 }
 
 #[must_use]
