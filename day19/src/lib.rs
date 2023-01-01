@@ -235,7 +235,7 @@ impl Blueprint {
     /// Returns the maximum number of geodes that can be produced using this blueprint.
     #[must_use]
     pub fn optimize_geodes(&self, time_limit: usize) -> usize {
-        optimize_breadth_first(self, time_limit, 1_000).map_or(0, |state| state.geodes())
+        optimize_geodes(self, time_limit, None).map_or(0, |state| state.geodes())
     }
 
     /// Returns the quality level of the blueprint.
@@ -298,15 +298,15 @@ impl Default for State {
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "State[ resources: ")?;
+        write!(f, "State {{ resources=[ ")?;
         for n in self.resources.iter() {
             write!(f, "{n} ")?;
         }
-        write!(f, ", robots: ")?;
+        write!(f, "], robots=[ ")?;
         for n in self.robots.iter() {
             write!(f, "{n} ")?;
         }
-        write!(f, "]")
+        write!(f, "] }}")
     }
 }
 
@@ -346,7 +346,9 @@ impl State {
             robots[kind] += 1;
             let state = Self {
                 // Deduct the cost of the new robot, and add in more resources produced in one
-                // minute by each of the existing robots.
+                // minute by each of the existing robots.  Use `self.robots` when updating
+                // resources and not `robots`, as the new robot does not produce any resources
+                // during the first minute.
                 resources: self.resources - costs[kind] + self.robots,
                 robots,
             };
@@ -373,85 +375,120 @@ impl State {
     pub fn dominates(&self, other: &Self) -> bool {
         self.resources.majorizes(&other.resources) && self.robots.majorizes(&other.robots)
     }
-}
 
-/// Advances a state by one unit of time.
-///
-/// Returns all possible future states at one time unit later.
-fn advance(mut state: State, costs: &ResourceMatrix<usize>) -> Vec<State> {
-    use ResourceKind::{Clay, Geode, Obsidian, Ore};
-
-    let mut output = Vec::new();
-    if let Some(s) = state.buy_robot(Geode, costs) {
-        output.push(s);
-    }
-    if let Some(s) = state.buy_robot(Obsidian, costs) {
-        output.push(s);
-    }
-    if let Some(s) = state.buy_robot(Clay, costs) {
-        output.push(s);
-    }
-    if let Some(s) = state.buy_robot(Ore, costs) {
-        output.push(s);
-    }
-    state.appreciate();
-    output.push(state);
-    output
-}
-
-/// Returns `true` iff `state` is dominated by another state.
-#[allow(unused)]
-fn is_dominated(state: &State, others: &[State]) -> bool {
-    others
-        .iter()
-        .any(|other| other.dominates(state) && other != state)
-}
-
-/// Returns only those states which are not dominated by any other state in the list.
-#[allow(unused)]
-fn prune(states: &[State]) -> Vec<State> {
-    states
-        .iter()
-        .filter(|state| !is_dominated(state, states))
-        .copied()
-        .collect()
-}
-
-/// Returns only those states which are not dominated by another state.
-///
-/// This function requires the states to be sorted first.
-#[allow(unused)]
-fn prune_sorted(states: &[State]) -> Vec<State> {
-    let mut pruned = Vec::new();
-    for state in states.iter() {
-        let ok = pruned.iter().all(|p: &State| !p.dominates(state));
-        if ok {
-            pruned.push(*state);
+    /// Returns an array indicating which robots are affordable.
+    fn affordable_robots(&self, costs: &ResourceMatrix<usize>) -> ResourceArray<bool> {
+        let mut affordable = ResourceArray::default();
+        for i in 0..4 {
+            affordable.0[i] = costs.0[i]
+                .iter()
+                .zip(self.resources.iter())
+                .all(|(a, b)| a <= b);
         }
+        affordable
     }
-    pruned
+
+    /// Returns an array indicating which robots we will eventually be able to afford given what
+    /// robots we currently have.
+    fn eventually_affordable_robots(&self, costs: &ResourceMatrix<usize>) -> ResourceArray<bool> {
+        let mut eventually_affordable = ResourceArray::default();
+        for i in 0..4 {
+            eventually_affordable.0[i] = costs.0[i]
+                .iter()
+                .zip(self.robots.iter())
+                .all(|(&c, &r)| c == 0 || r > 0);
+        }
+        eventually_affordable
+    }
+
+    /// Advances a state by one unit of time.
+    ///
+    /// Returns all possible future states at one time unit later.
+    fn advance(mut self, costs: &ResourceMatrix<usize>) -> Vec<State> {
+        use ResourceKind::{Clay, Geode, Obsidian, Ore};
+
+        let mut descendants = Vec::new();
+
+        if let Some(s) = self.buy_robot(Geode, costs) {
+            descendants.push(s);
+        }
+        // XXX Precompute this limit and pass it in: don't assume that geode is the only thing that
+        // costs obsidian.
+        if self.robots[Obsidian] < costs[Geode][Obsidian] {
+            if let Some(s) = self.buy_robot(Obsidian, costs) {
+                descendants.push(s);
+            }
+        }
+        // XXX Precompute this limit and pass it in: don't assume that obsidian is the only thing
+        // that costs clay.
+        if self.robots[Clay] < costs[Obsidian][Clay] {
+            if let Some(s) = self.buy_robot(Clay, costs) {
+                descendants.push(s);
+            }
+        }
+        // XXX Precompute this limit and pass it in.
+        //
+        // Purpose: if we have more of one type of robot that the maximum cost of any robot in
+        // terms of the corresponding resource, then this is wasteful: we can only buy one robot
+        // per minute, but we have enough robots of this resource type to make up in one minute
+        // more than we can spend.
+        if self.robots[Ore]
+            < [
+                costs[Ore][Ore],
+                costs[Clay][Ore],
+                costs[Obsidian][Ore],
+                costs[Geode][Ore],
+            ]
+            .into_iter()
+            .max()
+            .unwrap()
+        {
+            if let Some(s) = self.buy_robot(Ore, costs) {
+                descendants.push(s);
+            }
+        }
+
+        // If there is a robot that we cannot currently afford, but which we will be able to afford
+        // later if we just wait long enough, then we can purchase nothing at this step.  On the
+        // other hand, if we do not have sufficient robots to be able to eventually afford
+        // something that we cannot afford now, then we must purchase one of the robots we can
+        // afford --- purchasing a robot later instead of now when we can afford it now means we
+        // just get less return on it.
+        if self
+            .eventually_affordable_robots(costs)
+            .iter()
+            .zip(self.affordable_robots(costs).iter())
+            .any(|(&future, now)| future && !now)
+        {
+            self.appreciate();
+            descendants.push(self);
+        }
+        descendants
+    }
 }
 
 /// Returns the optimal state containing the most geodes after the given time limit.
 #[must_use]
-pub fn optimize_breadth_first(
+pub fn optimize_geodes(
     blueprint: &Blueprint,
     time_limit: usize,
-    stack_size: usize,
+    stack_size: Option<usize>,
 ) -> Option<State> {
     let mut states = vec![State::default()];
-    for _ in 1..=time_limit {
-        let next_states: Vec<_> = states
+    for t in 1..=time_limit {
+        states = states
             .into_iter()
-            .flat_map(|state| advance(state, &blueprint.costs).into_iter())
+            .flat_map(|state| state.advance(&blueprint.costs).into_iter())
             .collect();
-        states = next_states;
-        states.par_sort_by(|a, b| a.cmp(b).reverse());
-        states = states.into_iter().take(stack_size).collect();
+        if t < time_limit {
+            states.par_sort_by(|a, b| a.cmp(b).reverse());
+            states.dedup_by(|a, b| b.dominates(a));
+            if let Some(limit) = stack_size {
+                states.truncate(limit);
+            }
+        }
     }
-    states
-        .into_iter()
-        .max_by_key(|state| state.num_resource(ResourceKind::Geode))
+    states.into_iter().max_by_key(State::geodes)
 }
 
 #[cfg(test)]
@@ -494,7 +531,7 @@ mod tests {
         let input = fs::read_to_string("data/example")?;
         let blueprints = parse_input(&input)?;
         let quality_sum = solve_part2(&blueprints);
-        assert_eq!(quality_sum, 3348);
+        assert_eq!(quality_sum, 3472);
         Ok(())
     }
 
