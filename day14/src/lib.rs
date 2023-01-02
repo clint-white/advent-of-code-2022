@@ -43,12 +43,12 @@ where
         .iter()
         .flat_map(|line| line.iter().map(|&(x, _)| x))
         .max()
-        .unwrap_or_else(T::default);
+        .unwrap_or_default();
     let maxy = paths
         .iter()
         .flat_map(|line| line.iter().map(|&(_, y)| y))
         .max()
-        .unwrap_or_else(T::default);
+        .unwrap_or_default();
     (maxx, maxy)
 }
 
