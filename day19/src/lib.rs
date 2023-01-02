@@ -235,7 +235,7 @@ impl Blueprint {
     /// Returns the maximum number of geodes that can be produced using this blueprint.
     #[must_use]
     pub fn optimize_geodes(&self, time_limit: usize) -> usize {
-        optimize_geodes(self, time_limit, None).map_or(0, |state| state.geodes())
+        optimize_geodes(&self.costs, time_limit).map_or(0, |state| state.geodes())
     }
 
     /// Returns the quality level of the blueprint.
@@ -249,34 +249,6 @@ impl Blueprint {
     pub fn id(&self) -> usize {
         self.id
     }
-}
-
-/// Returns the sum of the quality levels of the blueprints.
-#[must_use]
-pub fn solve_part1(blueprints: &[Blueprint]) -> usize {
-    blueprints
-        .par_iter()
-        .map(|blueprint| blueprint.quality_level(24))
-        .sum()
-}
-
-#[must_use]
-pub fn solve_part2(blueprints: &[Blueprint]) -> usize {
-    blueprints
-        .par_iter()
-        .take(3)
-        .map(|blueprint| blueprint.optimize_geodes(32))
-        .product()
-}
-
-/// Parses the puzzle input as a vector of [`Blueprint`]s.
-///
-/// # Errors
-///
-/// Returns [`Error::ParseBlueprint`] if a line of input does not have the right format for a
-/// blueprint.  Returns [`Error::ParseInt`] if there is an error parsing an integer.
-pub fn parse_input(s: &str) -> Result<Vec<Blueprint>> {
-    s.lines().map(str::parse).collect()
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -403,8 +375,15 @@ impl State {
 
     /// Advances a state by one unit of time.
     ///
-    /// Returns all possible future states at one time unit later.
-    fn advance(mut self, costs: &ResourceMatrix<usize>) -> Vec<State> {
+    /// Returns all possible future states at one time unit later.  The array `limits` are upper
+    /// bounds on the number of robots of a given kind which a state can own.  Once such a limit
+    /// is reached, advancing the state will no longer include purchasing additional robots of that
+    /// kind even one is affordable.
+    fn advance(
+        mut self,
+        costs: &ResourceMatrix<usize>,
+        limits: &ResourceArray<usize>,
+    ) -> Vec<State> {
         use ResourceKind::{Clay, Geode, Obsidian, Ore};
 
         let mut descendants = Vec::new();
@@ -412,37 +391,20 @@ impl State {
         if let Some(s) = self.buy_robot(Geode, costs) {
             descendants.push(s);
         }
-        // XXX Precompute this limit and pass it in: don't assume that geode is the only thing that
-        // costs obsidian.
-        if self.robots[Obsidian] < costs[Geode][Obsidian] {
+
+        if self.robots[Obsidian] < limits[Obsidian] {
             if let Some(s) = self.buy_robot(Obsidian, costs) {
                 descendants.push(s);
             }
         }
-        // XXX Precompute this limit and pass it in: don't assume that obsidian is the only thing
-        // that costs clay.
-        if self.robots[Clay] < costs[Obsidian][Clay] {
+
+        if self.robots[Clay] < limits[Clay] {
             if let Some(s) = self.buy_robot(Clay, costs) {
                 descendants.push(s);
             }
         }
-        // XXX Precompute this limit and pass it in.
-        //
-        // Purpose: if we have more of one type of robot that the maximum cost of any robot in
-        // terms of the corresponding resource, then this is wasteful: we can only buy one robot
-        // per minute, but we have enough robots of this resource type to make up in one minute
-        // more than we can spend.
-        if self.robots[Ore]
-            < [
-                costs[Ore][Ore],
-                costs[Clay][Ore],
-                costs[Obsidian][Ore],
-                costs[Geode][Ore],
-            ]
-            .into_iter()
-            .max()
-            .unwrap()
-        {
+
+        if self.robots[Ore] < limits[Ore] {
             if let Some(s) = self.buy_robot(Ore, costs) {
                 descendants.push(s);
             }
@@ -465,30 +427,113 @@ impl State {
         }
         descendants
     }
+
+    /// Returns a very rough upper bound on the number of geodes that could be produced from this
+    /// state with the given amount of time.
+    ///
+    /// This function blatantly assumes that we will be able to purchase one new geode robot every
+    /// minute for the remaining time, whether or not this is possible given the current resources
+    /// and robots.
+    ///
+    /// This is a very fast but poor estimate of the number of geodes that could be produced, but
+    /// if the remaining time is somewhat small and the state is suboptimal, it is often sufficient
+    /// to rule out this state as being optimal.  It can be used to limit the number of possible
+    /// states that need to be considered when performing an exhaustive tree search for the optimal
+    /// strategy, if at least one good solution is known.
+    #[must_use]
+    pub fn bound_geodes(&self, time: usize) -> usize {
+        use ResourceKind::Geode;
+
+        self.resources[Geode] + time * self.robots[Geode] + time * time.saturating_sub(1) / 2
+    }
 }
 
 /// Returns the optimal state containing the most geodes after the given time limit.
-#[must_use]
-pub fn optimize_geodes(
-    blueprint: &Blueprint,
-    time_limit: usize,
-    stack_size: Option<usize>,
-) -> Option<State> {
+pub fn optimize_geodes(costs: &ResourceMatrix<usize>, time_limit: usize) -> Option<State> {
+    // Quickly find a good solution and use the number of geodes it provides to further prune the
+    // search tree.
+    let num_geodes = beam_search(costs, time_limit, 100).map_or(0, |state| state.geodes());
+
+    let robot_limits = maximum_resource_costs(costs);
     let mut states = vec![State::default()];
-    for t in 1..=time_limit {
+    for remaining in (0..time_limit).rev() {
         states = states
             .into_iter()
-            .flat_map(|state| state.advance(&blueprint.costs).into_iter())
+            .flat_map(|state| state.advance(costs, &robot_limits).into_iter())
+            .filter(|state| state.bound_geodes(remaining) >= num_geodes)
             .collect();
-        if t < time_limit {
+        if remaining > 0 {
             states.par_sort_by(|a, b| a.cmp(b).reverse());
             states.dedup_by(|a, b| b.dominates(a));
-            if let Some(limit) = stack_size {
-                states.truncate(limit);
-            }
         }
     }
     states.into_iter().max_by_key(State::geodes)
+}
+
+pub fn beam_search(
+    costs: &ResourceMatrix<usize>,
+    time_limit: usize,
+    width: usize,
+) -> Option<State> {
+    let robot_limits = maximum_resource_costs(costs);
+    let mut states = vec![State::default()];
+    for remaining in (0..time_limit).rev() {
+        states = states
+            .into_iter()
+            .flat_map(|state| state.advance(costs, &robot_limits).into_iter())
+            .collect();
+        if remaining > 0 {
+            states.par_sort_by(|a, b| a.cmp(b).reverse());
+            states.dedup_by(|a, b| b.dominates(a));
+            states.truncate(width);
+        }
+    }
+    states.into_iter().max_by_key(State::geodes)
+}
+
+/// Returns the maximum cost, in terms of each non-terminal resource, of any of the robot kinds.
+fn maximum_resource_costs(costs: &ResourceMatrix<usize>) -> ResourceArray<usize> {
+    use ResourceKind::{Clay, Geode, Obsidian, Ore};
+
+    let mut max_costs = ResourceArray::default();
+    for resource in [Ore, Clay, Obsidian, Geode] {
+        max_costs[resource] = [Ore, Clay, Obsidian, Geode]
+            .into_iter()
+            .map(|robot| costs[robot][resource])
+            .max()
+            .unwrap();
+    }
+    max_costs
+}
+
+/// Returns the sum of the quality levels of the blueprints in 24 minutes.
+#[must_use]
+pub fn solve_part1(blueprints: &[Blueprint]) -> usize {
+    blueprints
+        .par_iter()
+        .map(|blueprint| blueprint.quality_level(24))
+        .sum()
+}
+
+/// Returns the product of the maximum number of geodes possible from each of the first three
+/// blueprints in 32 minutes.
+#[must_use]
+pub fn solve_part2(blueprints: &[Blueprint]) -> usize {
+    blueprints
+        .par_iter()
+        .take(3)
+        .map(|blueprint| blueprint.optimize_geodes(32))
+        .product()
+}
+
+/// Parses the puzzle input as a vector of [`Blueprint`]s.
+///
+/// # Errors
+///
+/// Returns [`Error::ParseBlueprint`] if a line of input does not have the right format for a
+/// blueprint.  Returns [`Error::ParseInt`] if there is an error parsing an integer.
+pub fn parse_input(s: &str) -> Result<Vec<Blueprint>> {
+    s.lines().map(str::parse).collect()
 }
 
 #[cfg(test)]
