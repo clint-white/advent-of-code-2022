@@ -235,7 +235,7 @@ impl Blueprint {
     /// Returns the maximum number of geodes that can be produced using this blueprint.
     #[must_use]
     pub fn optimize_geodes(&self, time_limit: usize) -> usize {
-        optimize_geodes(&self.costs, time_limit).map_or(0, |state| state.geodes())
+        optimize_geodes(&self.costs, time_limit)
     }
 
     /// Returns the quality level of the blueprint.
@@ -448,11 +448,12 @@ impl State {
     }
 }
 
-/// Returns the optimal state containing the most geodes after the given time limit.
-pub fn optimize_geodes(costs: &ResourceMatrix<usize>, time_limit: usize) -> Option<State> {
+/// Returns the optimal number of geodes possible in the given time limit using provided robot
+/// costs.
+pub fn optimize_geodes(costs: &ResourceMatrix<usize>, time_limit: usize) -> usize {
     // Quickly find a good solution and use the number of geodes it provides to further prune the
     // search tree.
-    let num_geodes = beam_search(costs, time_limit, 100).map_or(0, |state| state.geodes());
+    let beam_standard = beam_search(costs, time_limit, 100);
 
     let robot_limits = maximum_resource_costs(costs);
     let mut states = vec![State::default()];
@@ -460,21 +461,22 @@ pub fn optimize_geodes(costs: &ResourceMatrix<usize>, time_limit: usize) -> Opti
         states = states
             .into_iter()
             .flat_map(|state| state.advance(costs, &robot_limits).into_iter())
-            .filter(|state| state.bound_geodes(remaining) >= num_geodes)
+            .filter(|state| state.bound_geodes(remaining) > beam_standard)
             .collect();
         if remaining > 0 {
             states.par_sort_by(|a, b| a.cmp(b).reverse());
             states.dedup_by(|a, b| b.dominates(a));
         }
     }
-    states.into_iter().max_by_key(State::geodes)
+    states
+        .into_iter()
+        .map(|state| state.geodes())
+        .max()
+        .unwrap_or(0)
+        .max(beam_standard)
 }
 
-pub fn beam_search(
-    costs: &ResourceMatrix<usize>,
-    time_limit: usize,
-    width: usize,
-) -> Option<State> {
+pub fn beam_search(costs: &ResourceMatrix<usize>, time_limit: usize, width: usize) -> usize {
     let robot_limits = maximum_resource_costs(costs);
     let mut states = vec![State::default()];
     for remaining in (0..time_limit).rev() {
@@ -488,7 +490,11 @@ pub fn beam_search(
             states.truncate(width);
         }
     }
-    states.into_iter().max_by_key(State::geodes)
+    states
+        .into_iter()
+        .map(|state| state.geodes())
+        .max()
+        .unwrap_or(0)
 }
 
 /// Returns the maximum cost, in terms of each non-terminal resource, of any of the robot kinds.
