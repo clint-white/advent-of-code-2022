@@ -9,8 +9,7 @@ use once_cell::sync::OnceCell;
 use regex::Regex;
 use thiserror::Error;
 
-pub mod grid;
-pub use grid::Grid;
+pub use utils::Grid;
 pub mod part1;
 pub mod part2;
 
@@ -46,7 +45,7 @@ pub enum Error {
 
     /// An error with the shape of the grid.
     #[error("An error with the shape of the grid")]
-    Grid(#[from] grid::Error),
+    Grid(#[from] utils::Error),
 
     /// No open tile on the first row of the board.
     #[error("No open tile on the first row of the board")]
