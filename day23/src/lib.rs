@@ -30,27 +30,32 @@ pub struct Position([isize; 2]);
 
 impl Position {
     /// Creates a new position from row and column indices.
+    #[must_use]
     pub fn new(i: isize, j: isize) -> Self {
         Self([i, j])
     }
 
     /// Returns an array of the row and column indices of this point.
+    #[must_use]
     #[inline]
     pub fn to_array(&self) -> [isize; 2] {
         self.0
     }
 
+    #[must_use]
     #[inline]
     pub fn row(&self) -> isize {
         self.0[0]
     }
 
+    #[must_use]
     #[inline]
     pub fn column(&self) -> isize {
         self.0[1]
     }
 
     /// Returns an array of this point's neighboring points.
+    #[must_use]
     #[inline]
     pub fn neighbors(&self) -> [Self; 8] {
         [
@@ -66,6 +71,7 @@ impl Position {
     }
 
     /// Returns an array of this point's neighboring points in the given direction.
+    #[must_use]
     #[inline]
     pub fn directed_neighbors(&self, direction: Direction) -> [Self; 3] {
         match direction {
@@ -76,6 +82,7 @@ impl Position {
         }
     }
 
+    #[must_use]
     #[inline]
     pub fn step(&self, direction: Direction) -> Self {
         let i = self.0[0];
@@ -127,6 +134,7 @@ pub struct Elves {
 }
 
 impl Elves {
+    #[must_use]
     pub fn new(positions: AHashSet<Position>) -> Self {
         Self {
             positions,
@@ -140,6 +148,7 @@ impl Elves {
     }
 
     /// Returns `true` iff there is at least one elf in the cells that neighbor a given `position`.
+    #[must_use]
     pub fn has_neighbors(&self, position: &Position) -> bool {
         position
             .neighbors()
@@ -149,6 +158,7 @@ impl Elves {
 
     /// Returns `true` iff there is at least one elf in the cells that neighbor a given `position`
     /// in the given `direction`.
+    #[must_use]
     pub fn has_directed_neighbors(&self, position: &Position, direction: &Direction) -> bool {
         position
             .directed_neighbors(*direction)
@@ -157,6 +167,7 @@ impl Elves {
     }
 
     /// Performs one round of elf shuffling and returns the number of elves that moved.
+    #[must_use]
     pub fn do_round(&mut self) -> usize {
         let mut targets = Vec::new();
         for elf in &self.positions {
@@ -199,14 +210,16 @@ impl Elves {
         num_moved
     }
 
+    #[must_use]
     pub fn bounding_box(&self) -> [[Option<isize>; 2]; 2] {
-        let row_min = self.positions.iter().map(|pos| pos.row()).min();
-        let row_max = self.positions.iter().map(|pos| pos.row()).max();
-        let col_min = self.positions.iter().map(|pos| pos.column()).min();
-        let col_max = self.positions.iter().map(|pos| pos.column()).max();
+        let row_min = self.positions.iter().map(Position::row).min();
+        let row_max = self.positions.iter().map(Position::row).max();
+        let col_min = self.positions.iter().map(Position::column).min();
+        let col_max = self.positions.iter().map(Position::column).max();
         [[row_min, row_max], [col_min, col_max]]
     }
 
+    #[must_use]
     pub fn count_empty_tiles(&self) -> Option<usize> {
         let num_elves = self.positions.len();
         let bounding_box = self.bounding_box();
@@ -221,7 +234,7 @@ impl Elves {
 
 pub fn solve_part1(elves: &mut Elves) -> usize {
     for _ in 0..10 {
-        elves.do_round();
+        let _ = elves.do_round();
     }
     elves.count_empty_tiles().expect("there are elves")
 }
