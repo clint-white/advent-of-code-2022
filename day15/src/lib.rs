@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use num_traits::Signed;
 use once_cell::sync::OnceCell;
+use rayon::prelude::*;
 use regex::Regex;
 use thiserror::Error;
 
@@ -274,39 +275,52 @@ pub fn solve_part2(
     xrange: RangeInclusive<i64>,
     yrange: RangeInclusive<i64>,
 ) -> Result<i64> {
-    let mut ans = Err(Error::NoLocation);
-    for y in yrange {
-        let intervals = reports
-            .iter()
-            .filter_map(|report| report.row_intersection(y))
-            .collect();
-        let disjoint = merge_intervals(intervals);
-        match disjoint.len() {
-            1 => {
-                let lower_gap = xrange.start().max(disjoint[0].start()) - xrange.start();
-                let upper_gap = xrange.end() - xrange.end().min(disjoint[0].end());
-                if upper_gap - lower_gap > 1 {
-                    return Err(Error::MultipleLocations);
+    let result: Result<Vec<_>> = yrange
+        .into_par_iter()
+        .filter_map(|y| {
+            let intervals = reports
+                .iter()
+                .filter_map(|report| report.row_intersection(y))
+                .collect();
+            let disjoint = merge_intervals(intervals);
+            match disjoint.len() {
+                1 => {
+                    let lower_gap = xrange.start().max(disjoint[0].start()) - xrange.start();
+                    let upper_gap = xrange.end() - xrange.end().min(disjoint[0].end());
+                    if upper_gap + lower_gap > 1 {
+                        Some(Err(Error::MultipleLocations))
+                    } else if upper_gap == 1 {
+                        Some(Ok((*xrange.end(), y)))
+                    } else if lower_gap == 1 {
+                        Some(Ok((*xrange.start(), y)))
+                    } else {
+                        None
+                    }
                 }
-            }
-            2 => {
-                if ans.is_err()
-                    && disjoint[0].start() <= xrange.start()
-                    && disjoint[0].end() + 2 == *disjoint[1].start()
-                    && disjoint[1].end() >= xrange.end()
-                {
-                    let x = *disjoint[0].end() + 1;
-                    ans = Ok(x * 4_000_000 + y);
-                } else {
-                    return Err(Error::MultipleLocations);
+                2 => {
+                    if disjoint[0].start() <= xrange.start()
+                        && disjoint[0].end() + 2 == *disjoint[1].start()
+                        && disjoint[1].end() >= xrange.end()
+                    {
+                        let x = *disjoint[0].end() + 1;
+                        Some(Ok((x, y)))
+                    } else {
+                        Some(Err(Error::MultipleLocations))
+                    }
                 }
+                _ => Some(Err(Error::MultipleLocations)),
             }
-            _ => {
-                return Err(Error::MultipleLocations);
-            }
+        })
+        .collect();
+    let points = result?;
+    match points.len() {
+        0 => Err(Error::NoLocation),
+        1 => {
+            let (x, y) = points[0];
+            Ok(4_000_000 * x + y)
         }
+        _ => Err(Error::MultipleLocations),
     }
-    ans
 }
 
 #[cfg(test)]
