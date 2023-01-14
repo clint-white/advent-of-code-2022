@@ -1,10 +1,10 @@
 //! Solutions to [Advent of Code 2022 Day 23](https://adventofcode.com/2022/day/23).
 
-use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::io;
 use std::ops::Add;
 
+use ahash::{AHashMap, AHashSet};
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -122,12 +122,12 @@ pub enum Direction {
 #[derive(Debug, Clone)]
 /// A set of elves on a two-dimensional coordinate grid.
 pub struct Elves {
-    pub positions: HashSet<Position>,
+    pub positions: AHashSet<Position>,
     direction_order: [Direction; 4],
 }
 
 impl Elves {
-    pub fn new(positions: HashSet<Position>) -> Self {
+    pub fn new(positions: AHashSet<Position>) -> Self {
         Self {
             positions,
             direction_order: [
@@ -174,7 +174,7 @@ impl Elves {
         }
 
         // Count how many times each new position was proposed.
-        let mut counts = HashMap::new();
+        let mut counts = AHashMap::new();
         for (_, target) in &targets {
             if let Some(p) = target {
                 *counts.entry(*p).or_insert(0) += 1;
@@ -240,7 +240,7 @@ pub fn solve_part2(elves: &mut Elves) -> usize {
 ///
 /// Returns an error if there is a character other than `'.'` or `'#'` on any line of the input.
 pub fn parse_input(s: &str) -> Result<Elves> {
-    let mut positions = HashSet::new();
+    let mut positions = AHashSet::new();
     for (i, line) in s.lines().enumerate() {
         let row = parse_row(i, line)?;
         positions.extend(row);
