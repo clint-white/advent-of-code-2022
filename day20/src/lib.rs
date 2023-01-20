@@ -35,9 +35,7 @@ pub fn parse_input(s: &str) -> Result<Vec<isize>> {
 }
 
 pub fn solve_part1(xs: &mut [isize]) -> Option<isize> {
-    let mut perm = identity_permutation(xs.len());
-    let mut inv = identity_permutation(xs.len());
-    mix(xs, &mut perm, &mut inv);
+    decrypt(xs, 1, 1);
     sum_coordinates(xs)
 }
 
@@ -57,39 +55,31 @@ fn sum_coordinates(xs: &[isize]) -> Option<isize> {
 }
 
 pub fn decrypt(xs: &mut [isize], key: isize, rounds: usize) {
-    xs.iter_mut().for_each(|x| *x *= key);
-    let mut perm = identity_permutation(xs.len());
-    let mut inv = identity_permutation(xs.len());
+    let mut ys: Vec<_> = xs.iter().map(|&x| x * key).enumerate().collect();
     for _ in 0..rounds {
-        mix(xs, &mut perm, &mut inv);
+        mix(&mut ys);
+    }
+    ys.into_iter()
+        .map(|(_, y)| y)
+        .zip(xs.iter_mut())
+        .for_each(|(y, x)| *x = y);
+}
+
+fn mix(ys: &mut [(usize, isize)]) {
+    let n = ys.len();
+    for t in 0..n {
+        let (i, &(_, y)) = ys.iter().enumerate().find(|&(_, (s, _))| *s == t).unwrap();
+        let j = add_mod(i, y, n - 1);
+        shift(i, j, ys);
     }
 }
 
-pub fn mix(xs: &mut [isize], perm: &mut [usize], inv: &mut [usize]) {
-    let n = xs.len();
-    for index in 0..n {
-        let i = perm[index];
-        let j = add_mod(i, xs[i], n - 1);
-        shift(i, j, xs, perm, inv);
-    }
-}
-
-fn shift(i: usize, j: usize, xs: &mut [isize], perm: &mut [usize], inv: &mut [usize]) {
+fn shift<T>(i: usize, j: usize, xs: &mut [T]) {
     match i.cmp(&j) {
         Ordering::Less => {
-            perm[inv[i]] = j;
-            for k in i + 1..=j {
-                perm[inv[k]] = k - 1;
-            }
-            inv[i..=j].rotate_left(1);
             xs[i..=j].rotate_left(1);
         }
         Ordering::Greater => {
-            perm[inv[i]] = j;
-            for k in j..i {
-                perm[inv[k]] = k + 1;
-            }
-            inv[j..=i].rotate_right(1);
             xs[j..=i].rotate_right(1);
         }
         Ordering::Equal => (),
@@ -105,10 +95,6 @@ fn add_mod(a: usize, x: isize, m: usize) -> usize {
         m - (x.unsigned_abs() % m)
     };
     (a + d) % m
-}
-
-fn identity_permutation(n: usize) -> Vec<usize> {
-    (0..n).collect()
 }
 
 #[cfg(test)]
@@ -128,10 +114,9 @@ mod tests {
 
     #[test]
     fn test_mix() {
-        let mut xs = vec![1, 2, -3, 3, -2, 0, 4];
-        let mut perm = identity_permutation(xs.len());
-        let mut inv = identity_permutation(xs.len());
-        mix(&mut xs, &mut perm, &mut inv);
+        let mut ys: Vec<_> = [1, 2, -3, 3, -2, 0, 4].into_iter().enumerate().collect();
+        mix(&mut ys);
+        let xs: Vec<_> = ys.into_iter().map(|(_, y)| y).collect();
         assert_eq!(xs, vec![-2, 1, 2, -3, 4, 0, 3]);
     }
 
