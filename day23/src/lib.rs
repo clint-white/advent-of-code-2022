@@ -228,11 +228,11 @@ impl Elves {
     #[must_use]
     pub fn as_array(&self) -> Option<ElfArray> {
         let (row_min, col_min, row_max, col_max) = self.bounding_box()?;
-        let row_offset = row_min - 1;
-        let col_offset = col_min - 1;
+        let row_offset = row_min;
+        let col_offset = col_min;
         let shape = (
-            (row_max - row_min + 3) as usize,
-            (col_max - col_min + 3) as usize,
+            (row_max + 1 - row_min) as usize,
+            (col_max + 1 - col_min) as usize,
         );
         let mut array = Array2::default(shape);
         for &elf in &self.positions {
