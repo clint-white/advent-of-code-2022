@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 use std::io;
-use std::ops::{Add, Index, IndexMut};
+use std::ops::{Add, Index};
 
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use ndarray::Array2;
@@ -130,7 +130,7 @@ pub enum Direction {
 #[derive(Debug, Clone)]
 /// A set of elves on a two-dimensional coordinate grid.
 pub struct Elves {
-    pub positions: HashSet<Position>,
+    pub positions: Vec<Position>,
     direction_order: [Direction; 4],
 }
 
@@ -138,7 +138,7 @@ impl Elves {
     #[must_use]
     pub fn new(positions: HashSet<Position>) -> Self {
         Self {
-            positions,
+            positions: positions.into_iter().collect(),
             direction_order: [
                 Direction::North,
                 Direction::South,
@@ -157,7 +157,7 @@ impl Elves {
             .positions
             .iter()
             .map(|&pos| {
-                let proposed = if array.has_neighbors(pos) {
+                if array.has_neighbors(pos) {
                     self.direction_order.iter().find_map(|&dir| {
                         if array.is_free_edge(pos, dir) {
                             Some(pos.step(dir))
@@ -167,22 +167,23 @@ impl Elves {
                     })
                 } else {
                     None
-                };
-                (pos, proposed)
+                }
             })
             .collect();
 
         // Count how many times each new position was proposed.
         let mut counts = HashMap::new();
-        for (_, target) in &targets {
+        for target in &targets {
             if let Some(p) = target {
                 *counts.entry(*p).or_insert(0) += 1;
             }
         }
         let num_moved = counts.values().filter(|&&count| count == 1).count();
-        let new_positions = targets
-            .into_iter()
-            .map(|(current, proposed)| {
+        let new_positions = self
+            .positions
+            .iter()
+            .zip(targets.into_iter())
+            .map(|(&current, proposed)| {
                 let mut pos = current;
                 if let Some(p) = proposed {
                     if counts.get(&p) == Some(&1) {
@@ -233,15 +234,21 @@ impl Elves {
             (row_max - row_min + 3) as usize,
             (col_max - col_min + 3) as usize,
         );
-        let mut array = ElfArray {
-            array: Array2::default(shape),
+        let mut array = Array2::default(shape);
+        for &elf in &self.positions {
+            let idx = [
+                (elf.0[0] - row_offset) as usize,
+                (elf.0[1] - col_offset) as usize,
+            ];
+            array[idx] = true;
+        }
+        let elf_array = ElfArray {
+            array,
             row_offset,
             col_offset,
+            missing: false,
         };
-        for &elf in &self.positions {
-            array[elf] = true;
-        }
-        Some(array)
+        Some(elf_array)
     }
 }
 
@@ -250,6 +257,7 @@ pub struct ElfArray {
     array: Array2<bool>,
     row_offset: isize,
     col_offset: isize,
+    missing: bool,
 }
 
 impl ElfArray {
@@ -266,28 +274,31 @@ impl ElfArray {
             .into_iter()
             .all(|p| !self[p])
     }
+
+    pub fn elves(&self) -> impl Iterator<Item = Position> + '_ {
+        self.array.indexed_iter().filter_map(|((r, c), &val)| {
+            if val {
+                Some(Position::new(
+                    r as isize + self.row_offset,
+                    c as isize + self.col_offset,
+                ))
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl Index<Position> for ElfArray {
     type Output = bool;
 
-    /// # Panics
-    ///
-    /// Panics if `pos` is more than one unit beyond the bounding box of the elves.
     fn index(&self, pos: Position) -> &Self::Output {
-        &self.array[[
-            (pos.0[0] - self.row_offset) as usize,
-            (pos.0[1] - self.col_offset) as usize,
-        ]]
-    }
-}
-
-impl IndexMut<Position> for ElfArray {
-    fn index_mut(&mut self, pos: Position) -> &mut Self::Output {
-        &mut self.array[[
-            (pos.0[0] - self.row_offset) as usize,
-            (pos.0[1] - self.col_offset) as usize,
-        ]]
+        self.array
+            .get([
+                (pos.0[0] - self.row_offset) as usize,
+                (pos.0[1] - self.col_offset) as usize,
+            ])
+            .unwrap_or(&self.missing)
     }
 }
 
