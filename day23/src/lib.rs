@@ -2,9 +2,10 @@
 
 use std::hash::Hash;
 use std::io;
-use std::ops::Add;
+use std::ops::{Add, Index, IndexMut};
 
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
+use ndarray::Array2;
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -147,42 +148,29 @@ impl Elves {
         }
     }
 
-    /// Returns `true` iff there is at least one elf in the cells that neighbor a given `position`.
-    #[must_use]
-    pub fn has_neighbors(&self, position: &Position) -> bool {
-        position
-            .neighbors()
-            .iter()
-            .any(|p| self.positions.contains(p))
-    }
-
-    /// Returns `true` iff there is at least one elf in the cells that neighbor a given `position`
-    /// in the given `direction`.
-    #[must_use]
-    pub fn has_directed_neighbors(&self, position: &Position, direction: &Direction) -> bool {
-        position
-            .directed_neighbors(*direction)
-            .iter()
-            .any(|p| self.positions.contains(p))
-    }
-
-    /// Performs one round of elf shuffling and returns the number of elves that moved.
-    #[must_use]
     pub fn do_round(&mut self) -> usize {
-        let mut targets = Vec::new();
-        for elf in &self.positions {
-            let mut target = None;
-            if self.has_neighbors(elf) {
-                if let Some(&direction) = self
-                    .direction_order
-                    .iter()
-                    .find(|direction| !self.has_directed_neighbors(elf, direction))
-                {
-                    target = Some(elf.step(direction));
-                }
-            }
-            targets.push((*elf, target));
+        if self.positions.is_empty() {
+            return 0;
         }
+        let array = self.as_array().unwrap();
+        let targets: Vec<_> = self
+            .positions
+            .iter()
+            .map(|&pos| {
+                let proposed = if array.has_neighbors(pos) {
+                    self.direction_order.iter().find_map(|&dir| {
+                        if array.is_free_edge(pos, dir) {
+                            Some(pos.step(dir))
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                };
+                (pos, proposed)
+            })
+            .collect();
 
         // Count how many times each new position was proposed.
         let mut counts = HashMap::new();
@@ -192,7 +180,6 @@ impl Elves {
             }
         }
         let num_moved = counts.values().filter(|&&count| count == 1).count();
-
         let new_positions = targets
             .into_iter()
             .map(|(current, proposed)| {
@@ -210,25 +197,97 @@ impl Elves {
         num_moved
     }
 
+    /// Returns min and max row and column indices: `(row_min, col_min, row_max, col_max)`.
     #[must_use]
-    pub fn bounding_box(&self) -> [[Option<isize>; 2]; 2] {
-        let row_min = self.positions.iter().map(Position::row).min();
-        let row_max = self.positions.iter().map(Position::row).max();
-        let col_min = self.positions.iter().map(Position::column).min();
-        let col_max = self.positions.iter().map(Position::column).max();
-        [[row_min, row_max], [col_min, col_max]]
+    pub fn bounding_box(&self) -> Option<(isize, isize, isize, isize)> {
+        self.positions.iter().fold(None, |state, pos| {
+            let row = pos.row();
+            let col = pos.column();
+            if let Some((row_min, col_min, row_max, col_max)) = state {
+                Some((
+                    row_min.min(row),
+                    col_min.min(col),
+                    row_max.max(row),
+                    col_max.max(col),
+                ))
+            } else {
+                Some((row, col, row, col))
+            }
+        })
     }
 
     #[must_use]
     pub fn count_empty_tiles(&self) -> Option<usize> {
         let num_elves = self.positions.len();
-        let bounding_box = self.bounding_box();
-        let row_min = bounding_box[0][0]?;
-        let row_max = bounding_box[0][1]?;
-        let col_min = bounding_box[1][0]?;
-        let col_max = bounding_box[1][1]?;
+        let (row_min, col_min, row_max, col_max) = self.bounding_box()?;
         let area = (row_max - row_min + 1).unsigned_abs() * (col_max - col_min + 1).unsigned_abs();
         Some(area - num_elves)
+    }
+
+    #[must_use]
+    pub fn as_array(&self) -> Option<ElfArray> {
+        let (row_min, col_min, row_max, col_max) = self.bounding_box()?;
+        let row_offset = row_min - 1;
+        let col_offset = col_min - 1;
+        let shape = (
+            (row_max - row_min + 3) as usize,
+            (col_max - col_min + 3) as usize,
+        );
+        let mut array = ElfArray {
+            array: Array2::default(shape),
+            row_offset,
+            col_offset,
+        };
+        for &elf in &self.positions {
+            array[elf] = true;
+        }
+        Some(array)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ElfArray {
+    array: Array2<bool>,
+    row_offset: isize,
+    col_offset: isize,
+}
+
+impl ElfArray {
+    /// Returns `true` iff there is an elf in the neighborhood of `pos`.
+    #[must_use]
+    pub fn has_neighbors(&self, pos: Position) -> bool {
+        pos.neighbors().into_iter().any(|p| self[p])
+    }
+
+    /// Returns `true` iff there are no elves along the edge in the given direction from `pos`.
+    #[must_use]
+    pub fn is_free_edge(&self, pos: Position, direction: Direction) -> bool {
+        pos.directed_neighbors(direction)
+            .into_iter()
+            .all(|p| !self[p])
+    }
+}
+
+impl Index<Position> for ElfArray {
+    type Output = bool;
+
+    /// # Panics
+    ///
+    /// Panics if `pos` is more than one unit beyond the bounding box of the elves.
+    fn index(&self, pos: Position) -> &Self::Output {
+        &self.array[[
+            (pos.0[0] - self.row_offset) as usize,
+            (pos.0[1] - self.col_offset) as usize,
+        ]]
+    }
+}
+
+impl IndexMut<Position> for ElfArray {
+    fn index_mut(&mut self, pos: Position) -> &mut Self::Output {
+        &mut self.array[[
+            (pos.0[0] - self.row_offset) as usize,
+            (pos.0[1] - self.col_offset) as usize,
+        ]]
     }
 }
 
