@@ -35,13 +35,13 @@ pub fn parse_input(s: &str) -> Result<Vec<isize>> {
 }
 
 pub fn solve_part1(xs: &mut [isize]) -> Option<isize> {
-    decrypt(xs, 1, 1);
-    sum_coordinates(xs)
+    let ys = decrypt(xs, 1, 1);
+    sum_coordinates(&ys)
 }
 
 pub fn solve_part2(xs: &mut [isize]) -> Option<isize> {
-    decrypt(xs, 811_589_153, 10);
-    sum_coordinates(xs)
+    let ys = decrypt(xs, 811_589_153, 10);
+    sum_coordinates(&ys)
 }
 
 fn sum_coordinates(xs: &[isize]) -> Option<isize> {
@@ -54,23 +54,28 @@ fn sum_coordinates(xs: &[isize]) -> Option<isize> {
     Some(s)
 }
 
-pub fn decrypt(xs: &mut [isize], key: isize, rounds: usize) {
-    let mut ys: Vec<_> = xs.iter().map(|&x| x * key).enumerate().collect();
+#[must_use]
+pub fn decrypt(xs: &[isize], key: isize, rounds: usize) -> Vec<isize> {
+    let mut perm: Vec<_> = (0..xs.len()).collect();
+    let ys: Vec<_> = xs.iter().map(|&x| x * key).collect();
     for _ in 0..rounds {
-        mix(&mut ys);
+        mix(&ys, &mut perm);
     }
-    ys.into_iter()
-        .map(|(_, y)| y)
-        .zip(xs.iter_mut())
-        .for_each(|(y, x)| *x = y);
+    perm.into_iter().map(|t| ys[t]).collect()
 }
 
-fn mix(ys: &mut [(usize, isize)]) {
-    let n = ys.len();
-    for t in 0..n {
-        let (i, &(_, y)) = ys.iter().enumerate().find(|&(_, (s, _))| *s == t).unwrap();
-        let j = add_mod(i, y, n - 1);
-        shift(i, j, ys);
+fn mix(xs: &[isize], perm: &mut [usize]) {
+    let n = xs.len();
+    for (t, &x) in xs.iter().enumerate() {
+        // Find the index where the permutation sends `t`.  Unwrap the `Option` because `perm` is a
+        // permutation, so we know that `t` is somewhere.
+        let i = perm
+            .iter()
+            .enumerate()
+            .find_map(|(i, &s)| if s == t { Some(i) } else { None })
+            .unwrap();
+        let j = add_mod(i, x, n - 1);
+        shift(i, j, perm);
     }
 }
 
@@ -114,10 +119,11 @@ mod tests {
 
     #[test]
     fn test_mix() {
-        let mut ys: Vec<_> = [1, 2, -3, 3, -2, 0, 4].into_iter().enumerate().collect();
-        mix(&mut ys);
-        let xs: Vec<_> = ys.into_iter().map(|(_, y)| y).collect();
-        assert_eq!(xs, vec![-2, 1, 2, -3, 4, 0, 3]);
+        let xs = vec![1, 2, -3, 3, -2, 0, 4];
+        let mut pi: Vec<_> = (0..xs.len()).collect();
+        mix(&xs, &mut pi);
+        let ys: Vec<_> = pi.into_iter().map(|t| xs[t]).collect();
+        assert_eq!(ys, vec![-2, 1, 2, -3, 4, 0, 3]);
     }
 
     #[test]
