@@ -35,11 +35,23 @@ $ cargo run --release -p day01 < day01/data/input
 
 ## Benchmarks
 
-Solves all 25 problems sequentially in a cumulative time of under 0.5s:
+Solves all 25 problems sequentially in an average cumulative time of less than
+0.32 seconds on my AMD Ryzen 7 3700 (8C/16T):
 
 ```
-$ hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input > /dev/null; done'
+% hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input > /dev/null; done'
 Benchmark 1: for day in day*; do target/release/$day < $day/data/input > /dev/null; done
-  Time (mean ± σ):     442.6 ms ±  11.3 ms    [User: 1352.0 ms, System: 22.5 ms]
-  Range (min … max):   427.4 ms … 459.5 ms    10 runs
+  Time (mean ± σ):     313.5 ms ±   4.1 ms    [User: 1223.1 ms, System: 26.6 ms]
+  Range (min … max):   307.4 ms … 321.3 ms    10 runs
 ```
+
+Every day's solution runs in under 100ms.  Here are the average times of the
+five slowest:
+
+| Day | Time (ms)   | # Threads |
+| --- | ----------: | --------: |
+| 23  | 98.0 |  1 |
+| 15  | 61.2 | 16 |
+| 20  | 51.2 |  1 |
+| 24  | 29.1 |  1 |
+| 16  | 20.8 |  1 |
