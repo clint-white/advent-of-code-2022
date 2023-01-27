@@ -173,10 +173,8 @@ impl Elves {
 
         // Count how many times each new position was proposed.
         let mut counts = HashMap::new();
-        for target in &targets {
-            if let Some(p) = target {
-                *counts.entry(*p).or_insert(0) += 1;
-            }
+        for &target in targets.iter().flatten() {
+            *counts.entry(target).or_insert(0) += 1;
         }
         let num_moved = counts.values().filter(|&&count| count == 1).count();
         let new_positions = self
