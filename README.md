@@ -2,9 +2,11 @@ Advent of Code 2022
 ===================
 
 These are my solutions to [Advent of Code 2022](https://adventofcode.com/2022),
-written in Rust.  The tag `v1.0.0` marks the state of the code when I completed
-all of the puzzles.  Subsequent commits are continuing work to improve the
-code's style and [performance](#benchmarks) and to fix bugs.
+written in Rust.  The tag
+[v1.0.0](https://github.com/clint-white/advent-of-code-2022/tree/v1.0.0)
+marks the state of the code when I completed all of the puzzles.  Subsequent
+commits are continuing work to improve the code's style and
+[performance](#benchmarks) and to fix bugs.
 
 Each day's puzzle is implemented as a package with a binary and a library
 crate.  All examples provided as part of the puzzle descriptions are used as
@@ -34,17 +36,17 @@ $ cargo run --release -p day01 < day01/data/input
 
 ## Benchmarks
 
-Initially I just tried to solve the problems without worrying about
-performance.  But after completing all 25 problems, I worked on optimizing the
+Initially I just tried to solve the problems without worrying about how fast
+they ran.  But after completing all 25 problems, I worked on optimizing the
 performance of some of my slowest solutions and was able to make significant
-improvements in some cases.
+improvements.
 
 The programs were benchmarked by compiling with `-C target-cpu=native` and run
 on an AMD Ryzen 7 3700X.  Runtimes were measured using
 [hyperfine](https://github.com/sharkdp/hyperfine).
 
-Solves all 25 problems sequentially in a cumulative time of less than **0.3
-seconds**:
+On my system, the code now solves all 25 problems sequentially in a cumulative
+time of less than **0.3 seconds**:
 
 ```
 % hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input; done'
@@ -56,7 +58,7 @@ Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
 No day's solution now takes more than 100 ms.  These are the slowest:
 
 | Day | Mean [ms] | Min [ms] | Max [ms] |
-|:---|---:|---:|---:|---:|
+|:---|---:|---:|---:|
 | `day23` | 92.5 ± 2.1 | 89.2 | 98.9 |
 | `day15` | 60.8 ± 1.0 | 59.7 | 64.4 |
 | `day20` | 39.2 ± 1.8 | 37.9 | 46.1 |
