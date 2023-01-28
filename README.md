@@ -1,11 +1,10 @@
 Advent of Code 2022
 ===================
 
-These are my solutions to [Advent of Code 2022](https://adventofcode.com/2022).
-All solutions are written in Rust.  The git tag `v1.0.0` marks the state of the
-code when I completed all of the puzzles.  Subsequent commits are continuing
-work to improve the style and performance of the solutions and to fix any bugs
-I discover.
+These are my solutions to [Advent of Code 2022](https://adventofcode.com/2022),
+written in Rust.  The tag `v1.0.0` marks the state of the code when I completed
+all of the puzzles.  Subsequent commits are continuing work to improve the
+code's style and [performance](#benchmarks) and to fix bugs.
 
 Each day's puzzle is implemented as a package with a binary and a library
 crate.  All examples provided as part of the puzzle descriptions are used as
@@ -27,7 +26,7 @@ The example and actual puzzle inputs are in files in the `data` subdirectory of
 each day's package.  The main programs take no arguments and read their input
 from stdin.
 
-Run the solution for a particular day on my input file:
+Run the program to solve both parts for a particular day:
 
 ```
 $ cargo run --release -p day01 < day01/data/input
@@ -35,23 +34,33 @@ $ cargo run --release -p day01 < day01/data/input
 
 ## Benchmarks
 
-Solves all 25 problems sequentially in an average cumulative time of less than
-0.32 seconds on my AMD Ryzen 7 3700 (8C/16T):
+Initially I just tried to solve the problems without worrying about
+performance.  But after completing all 25 problems, I worked on optimizing the
+performance of some of my slowest solutions and was able to make significant
+improvements in some cases.
+
+The programs were benchmarked by compiling with `-C target-cpu=native` and run
+on an AMD Ryzen 7 3700X.  Runtimes were measured using
+[hyperfine](https://github.com/sharkdp/hyperfine).
+
+Solves all 25 problems sequentially in a cumulative time of less than **0.3
+seconds**:
 
 ```
-% hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input > /dev/null; done'
-Benchmark 1: for day in day*; do target/release/$day < $day/data/input > /dev/null; done
-  Time (mean ± σ):     313.5 ms ±   4.1 ms    [User: 1223.1 ms, System: 26.6 ms]
-  Range (min … max):   307.4 ms … 321.3 ms    10 runs
+% hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input; done'
+Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
+  Time (mean ± σ):     294.9 ms ±   2.7 ms    [User: 1203.5 ms, System: 24.7 ms]
+  Range (min … max):   290.9 ms … 299.0 ms    10 runs
 ```
 
-Every day's solution runs in under 100ms.  Here are the average times of the
-five slowest:
+No day's solution now takes more than 100 ms.  These are the slowest:
 
-| Day | Time (ms)   | # Threads |
-| --- | ----------: | --------: |
-| 23  | 98.0 |  1 |
-| 15  | 61.2 | 16 |
-| 20  | 51.2 |  1 |
-| 24  | 29.1 |  1 |
-| 16  | 20.8 |  1 |
+| Day | Mean [ms] | Min [ms] | Max [ms] |
+|:---|---:|---:|---:|---:|
+| `day23` | 92.5 ± 2.1 | 89.2 | 98.9 |
+| `day15` | 60.8 ± 1.0 | 59.7 | 64.4 |
+| `day20` | 39.2 ± 1.8 | 37.9 | 46.1 |
+| `day24` | 30.4 ± 0.8 | 29.7 | 34.4 |
+| `day16` | 20.6 ± 0.6 | 20.1 | 23.4 |
+
+All other days' solutions run in average times of less than 10 ms each.
