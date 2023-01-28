@@ -1,6 +1,8 @@
 Advent of Code 2022
 ===================
 
+[![Continuous Integration](https://github.com/clint-white/advent-of-code-2022/actions/workflows/ci.yml/badge.svg)](https://github.com/clint-white/advent-of-code-2022/actions/workflows/ci.yml)
+
 These are my solutions to [Advent of Code 2022](https://adventofcode.com/2022),
 written in Rust.  The tag
 [v1.0.0](https://github.com/clint-white/advent-of-code-2022/tree/v1.0.0)
