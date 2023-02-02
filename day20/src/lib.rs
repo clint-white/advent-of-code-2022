@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::io;
 use std::num::ParseIntError;
 
+use itertools::Itertools;
 use thiserror::Error;
 
 /// The error type for operations in this crate.
@@ -57,25 +58,95 @@ fn sum_coordinates(xs: &[isize]) -> Option<isize> {
 #[must_use]
 pub fn decrypt(xs: &[isize], key: isize, rounds: usize) -> Vec<isize> {
     let mut perm: Vec<_> = (0..xs.len()).collect();
+    let mut last = vec![0; xs.len()];
     let ys: Vec<_> = xs.iter().map(|&x| x * key).collect();
-    for _ in 0..rounds {
-        mix(&ys, &mut perm);
+    match rounds {
+        0 => (),
+        1 => mix0(&ys, &mut perm, &mut last),
+        _ => {
+            mix0(&ys, &mut perm, &mut last);
+            mix1(&ys, &mut perm, &mut last);
+            for _ in 2..rounds {
+                mix(&ys, &mut perm, &mut last);
+            }
+        }
     }
     perm.into_iter().map(|t| ys[t]).collect()
 }
 
-fn mix(xs: &[isize], perm: &mut [usize]) {
+/// Applies mixing for round 0.
+///
+/// Round 0 is special because the permutation is initially the identity.  Sequential elements `t -
+/// 1` and `t` are consecutive in the slice `perm`.  Until we get to the iteration on which we move
+/// element `t`, it must occur at an index greater than that of where `t - 1` occurs, since on the
+/// first round we only shift left as a result of moving earlier elements.
+fn mix0(xs: &[isize], perm: &mut [usize], last: &mut [usize]) {
     let n = xs.len();
+    let mut previous = 0;
     for (t, &x) in xs.iter().enumerate() {
-        // Find the index where the permutation sends `t`.  Unwrap the `Option` because `perm` is a
-        // permutation, so we know that `t` is somewhere.
-        let i = perm
+        let i = perm[previous..]
             .iter()
             .enumerate()
+            .find_map(|(i, &s)| if s == t { Some(i + previous) } else { None })
+            .unwrap();
+        let j = add_mod(i, x, n - 1);
+        shift(i, j, perm);
+        // We will start searching for `t + 1` where we found `t`.
+        previous = i;
+        last[t] = j
+    }
+}
+
+/// Applies mixing for round 1.
+///
+/// In round 1, for early iterations we find `t` at indices much smaller than `last[t]`.  As `t`
+/// increases, the gap between where we find `t` and `last[t]` decreases.  Eventually, for large
+/// `t`, we find `t` at indices much larger than `last[t]`.
+///
+/// Here our strategy is start looking for `t` at `last[t]` adjusted by an offset, where the offset
+/// is the actual offset from the previous iteration (i.e., the difference between where we found
+/// `t - 1` and `last[t - 1]`).  The actual offset for iteration `t` is then used to predict it for
+/// the next iteration.
+fn mix1(xs: &[isize], perm: &mut [usize], last: &mut [usize]) {
+    let n = xs.len();
+    let mut offset = last[0] as isize;
+    for (t, &x) in xs.iter().enumerate() {
+        let k = (last[t] as isize - offset).max(0).min((n - 1) as isize) as usize;
+        let i = perm[k..]
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i + k, s))
+            .interleave(perm[..k].iter().enumerate().rev())
             .find_map(|(i, &s)| if s == t { Some(i) } else { None })
             .unwrap();
         let j = add_mod(i, x, n - 1);
         shift(i, j, perm);
+        offset = last[t] as isize - i as isize;
+        last[t] = j;
+    }
+}
+
+/// Applies mixing for rounds n > 1.
+///
+/// Once the permutation looks random(ish), we just start searching for `t` where we last moved it
+/// on the previous round, searching forward and backward in an interleaved fashion.
+fn mix(xs: &[isize], perm: &mut [usize], last: &mut [usize]) {
+    let n = xs.len();
+    for (t, &x) in xs.iter().enumerate() {
+        // Find the index where the permutation sends `t`.  We start searching at the index where
+        // `t` was moved on the previous round.  Start searching forward and backward interleaved
+        // from there.  We unwrap the `Option` because we know `t` is somewhere.
+        let k = last[t];
+        let i = perm[k..]
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i + k, s))
+            .interleave(perm[..k].iter().enumerate().rev())
+            .find_map(|(i, &s)| if s == t { Some(i) } else { None })
+            .unwrap();
+        let j = add_mod(i, x, n - 1);
+        shift(i, j, perm);
+        last[t] = j;
     }
 }
 
@@ -115,15 +186,6 @@ mod tests {
         assert_eq!(add_mod(2, -16, 6), 4);
         assert_eq!(add_mod(4, 20, 11), 2);
         assert_eq!(add_mod(4, -20, 11), 6);
-    }
-
-    #[test]
-    fn test_mix() {
-        let xs = vec![1, 2, -3, 3, -2, 0, 4];
-        let mut pi: Vec<_> = (0..xs.len()).collect();
-        mix(&xs, &mut pi);
-        let ys: Vec<_> = pi.into_iter().map(|t| xs[t]).collect();
-        assert_eq!(ys, vec![-2, 1, 2, -3, 4, 0, 3]);
     }
 
     #[test]
