@@ -1,5 +1,7 @@
 //! Solutions to [Advent of Code 2022 Day 20](https://adventofcode.com/2022/day/20).
 
+#![allow(clippy::manual_clamp)]
+
 use std::cmp::Ordering;
 use std::io;
 use std::num::ParseIntError;
@@ -111,6 +113,9 @@ fn mix1(xs: &[isize], perm: &mut [usize], last: &mut [usize]) {
     let n = xs.len();
     let mut offset = last[0] as isize;
     for (t, &x) in xs.iter().enumerate() {
+        // The lint `clippy::manual_clamp` recommends using `.clamp()` here, but it is at least 0.5
+        // ms slower than the manual version:
+        // let k = (last[t] as isize - offset).clamp(0, (n - 1) as isize) as usize;
         let k = (last[t] as isize - offset).max(0).min((n - 1) as isize) as usize;
         let i = perm[k..]
             .iter()
