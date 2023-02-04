@@ -5,7 +5,7 @@ Advent of Code 2022
 
 These are my solutions to [Advent of Code 2022](https://adventofcode.com/2022),
 written in Rust.  The tag
-[v1.0.0](https://github.com/clint-white/advent-of-code-2022/tree/v1.0.0)
+[`v1.0.0`](https://github.com/clint-white/advent-of-code-2022/tree/v1.0.0)
 marks the state of the code when I completed all of the puzzles.  Subsequent
 commits are continuing work to improve the code's style and
 [performance](#benchmarks) and to fix bugs.
@@ -40,15 +40,10 @@ $ cargo run --release -p day01 < day01/data/input
 
 Initially I just tried to solve the problems without worrying about how fast
 they ran.  But after completing all 25 problems, I worked on optimizing the
-performance of some of my slowest solutions and was able to make significant
-improvements.
+performance of my slowest solutions.  Here are some current benchmarks.
 
-The programs were benchmarked by compiling with `-C target-cpu=native` and run
-on an AMD Ryzen 7 3700X.  Runtimes were measured using
-[hyperfine](https://github.com/sharkdp/hyperfine).
-
-On my system, the code solves all 25 problems sequentially in a cumulative time
-of **0.27 seconds**:
+On my system, the programs for all 25 days run sequentially in a cumulative
+time of **0.27 seconds**:
 
 ```
 % hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input; done'
@@ -57,7 +52,7 @@ Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
   Range (min … max):   264.0 ms … 272.3 ms    11 runs
 ```
 
-No day's solution now takes more than 100 ms.  These are the slowest:
+Every program completes in less than 100 ms.  These are the slowest:
 
 | Day | Mean [ms] | Min [ms] | Max [ms] |
 |:---|---:|---:|---:|
@@ -68,3 +63,7 @@ No day's solution now takes more than 100 ms.  These are the slowest:
 | `day20` | 12.1 ± 0.4 | 11.6 | 13.9 |
 
 All other days' solutions run in average times of less than 10 ms each.
+
+These benchmarks were performed on an AMD Ryzen 7 3700X using
+[hyperfine](https://github.com/sharkdp/hyperfine).  The code was compiled with
+`-C target-cpu=native`.
