@@ -16,13 +16,13 @@ unit tests, as are the actual puzzle inputs and answers.
 
 Run the tests for a particular day:
 
-```
+```console
 $ cargo test -p day01
 ```
 
 Run the tests for all the days:
 
-```
+```console
 $ cargo test
 ```
 
@@ -32,7 +32,7 @@ from stdin.
 
 Run the program to solve both parts for a particular day:
 
-```
+```console
 $ cargo run --release -p day01 < day01/data/input
 ```
 
@@ -45,7 +45,7 @@ performance of my slowest solutions.  Here are some current benchmarks.
 On my system, the programs for all 25 days run sequentially in a cumulative
 time of **0.27 seconds**:
 
-```
+```console
 % hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input; done'
 Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
   Time (mean ± σ):     268.0 ms ±   2.8 ms    [User: 1167.1 ms, System: 29.3 ms]
