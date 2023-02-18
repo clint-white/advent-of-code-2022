@@ -42,27 +42,25 @@ Initially I just tried to solve the problems without worrying about how fast
 they ran.  But after completing all 25 problems, I worked on optimizing the
 performance of my slowest solutions.  Here are some current benchmarks.
 
-On my system, the programs for all 25 days run sequentially in a cumulative
-time of **0.27 seconds**:
+On my system, the solutions to all 25 problems run sequentially in a cumulative
+time of **0.21 seconds**:
 
 ```console
-% hyperfine --warmup 3 'for day in day*; do target/release/$day < $day/data/input; done'
+% hyperfine --warmup 10 'for day in day*; do target/release/$day < $day/data/input; done'
 Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
-  Time (mean ± σ):     268.0 ms ±   2.8 ms    [User: 1167.1 ms, System: 29.3 ms]
-  Range (min … max):   264.0 ms … 272.3 ms    11 runs
+  Time (mean ± σ):     209.6 ms ±   6.3 ms    [User: 220.0 ms, System: 25.8 ms]
+  Range (min … max):   200.1 ms … 221.0 ms    14 runs
 ```
 
-Every program completes in less than 100 ms.  These are the slowest:
+Every solution completes in less than 100 ms, and all but the following complete
+in under 10 ms:
 
 | Day | Mean [ms] | Min [ms] | Max [ms] |
 |:---|---:|---:|---:|
 | `day23` | 92.5 ± 2.1 | 89.2 | 98.9 |
-| `day15` | 60.8 ± 1.0 | 59.7 | 64.4 |
 | `day24` | 30.4 ± 0.8 | 29.7 | 34.4 |
 | `day16` | 20.6 ± 0.6 | 20.1 | 23.4 |
 | `day20` | 12.1 ± 0.4 | 11.6 | 13.9 |
-
-All other days' solutions run in average times of less than 10 ms each.
 
 These benchmarks were performed on an AMD Ryzen 7 3700X using
 [hyperfine](https://github.com/sharkdp/hyperfine).  The code was compiled with
