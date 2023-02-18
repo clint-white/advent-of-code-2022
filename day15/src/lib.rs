@@ -343,7 +343,7 @@ mod tests {
         let input = fs::read_to_string("data/input")?;
         let reports = parse_input(&input)?;
         let num = solve_part1(&reports, 2_000_000);
-        assert_eq!(num, 4811413);
+        assert_eq!(num, 4_811_413);
         Ok(())
     }
 
@@ -352,7 +352,7 @@ mod tests {
         let input = fs::read_to_string("data/example")?;
         let reports = parse_input(&input)?;
         let num = solve_part2(&reports, 0..=20, 0..=20)?;
-        assert_eq!(num, 56000011);
+        assert_eq!(num, 56_000_011);
         Ok(())
     }
 
@@ -361,7 +361,7 @@ mod tests {
         let input = fs::read_to_string("data/input")?;
         let reports = parse_input(&input)?;
         let num = solve_part2(&reports, 0..=4_000_000, 0..=4_000_000)?;
-        assert_eq!(num, 13171855019123);
+        assert_eq!(num, 13_171_855_019_123);
         Ok(())
     }
 }
