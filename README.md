@@ -42,8 +42,8 @@ Initially I just tried to solve the problems without worrying about how fast
 they ran.  But after completing all 25 problems, I worked on optimizing the
 performance of my slowest solutions.  Here are some current benchmarks.
 
-On my system, the solutions to all 25 problems run sequentially in a cumulative
-time of **0.21 seconds**:
+On an AMD Ryzen 7 3700X, the solutions to all 25 problems run sequentially in a
+cumulative time of **0.21 seconds**:
 
 ```console
 % hyperfine --warmup 10 'for day in day*; do target/release/$day < $day/data/input; done'
@@ -62,6 +62,16 @@ in under 10 ms:
 | `day16` | 20.6 ± 0.6 | 20.1 | 23.4 |
 | `day20` | 12.1 ± 0.4 | 11.6 | 13.9 |
 
-These benchmarks were performed on an AMD Ryzen 7 3700X using
+On a Raspberry Pi 4 Model B `aarch64`, the solutions to all 25 problems run
+consecutively in under 1 second:
+
+```console
+% hyperfine --warmup 10 'for day in day*; do target/release/$day < $day/data/input; done'
+Benchmark 1: for day in day*; do target/release/$day < $day/data/input; done
+  Time (mean ± σ):     943.2 ms ±   4.6 ms    [User: 883.3 ms, System: 124.1 ms]
+  Range (min … max):   938.7 ms … 951.3 ms    10 runs
+```
+
+These benchmarks were performed using
 [hyperfine](https://github.com/sharkdp/hyperfine).  The code was compiled with
 `-C target-cpu=native`.
